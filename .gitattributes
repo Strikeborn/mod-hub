@@ -1,0 +1,5 @@
+# Keep LF in the repo and working copy (files are LF today); batch files need CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.svg text eol=lf

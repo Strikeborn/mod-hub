@@ -1,0 +1,66 @@
+# Vortex plugin repo (its own git history) checked out inside mod-hub
+/vortex-builtin-mod-browser-enhanced/
+
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+dist-electron
+*.tsbuildinfo
+
+# Logs (tools/start-mod-hub.ps1 and agent-run write here)
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Cowork agent watcher trigger files
+tools/.trigger-*
+
+# Secrets / local env (Nexus API key lives in %APPDATA%\mod-hub\settings.json, keep it out of here)
+.env
+.env.*
+*.local
+*.pem
+*.key
+settings.json
+catalog.json
+
+# Mod Hub runtime data. It normally lives in %APPDATA%\mod-hub; never commit a copy that lands here.
+workshop-archive.json
+download-archive-index.json
+steam-creator-names.json
+favorites.json
+unsubscribed.json
+browse-injection.js
+/thumbs/
+/backups/
+/loadouts/
+/kept-mods/
+/vault/
+
+# Packaged app output (electron-builder / forge)
+release/
+out/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.cursor/
+.claude/settings.local.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
