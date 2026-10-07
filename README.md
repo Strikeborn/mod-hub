@@ -39,4 +39,3 @@ Data lives in `%APPDATA%\mod-hub\` (catalog, settings, thumbnail cache, config b
 - The injected Nexus browse carousel uses `injectionRuntime.js` from the separate
   [Vortex mod-browser-carousel plugin](https://github.com/Strikeborn/nexus-vortex-mod-browser-carousel) repo, checked out next to this one as
   `vortex-builtin-mod-browser-enhanced/` (not part of this repo).
-- `HANDOFF.md` / `NEXT_CHAT.md` are working notes for AI-assisted development sessions.

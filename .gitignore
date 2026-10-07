@@ -48,6 +48,10 @@ browse-injection.js
 release/
 out/
 
+# AI working notes (kept locally, not published)
+HANDOFF.md
+NEXT_CHAT.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
