@@ -39,3 +39,9 @@ Data lives in `%APPDATA%\mod-hub\` (catalog, settings, thumbnail cache, config b
 - The injected Nexus browse carousel uses `injectionRuntime.js` from the separate
   [Vortex mod-browser-carousel plugin](https://github.com/Strikeborn/nexus-vortex-mod-browser-carousel) repo, checked out next to this one as
   `vortex-builtin-mod-browser-enhanced/` (not part of this repo).
+
+## License
+
+Mod Hub is free software under the [GNU General Public License v3.0](LICENSE) (or any later version).
+You can use, study, change and share it; if you distribute a modified version, it has to stay under the GPL
+with its source code available.
