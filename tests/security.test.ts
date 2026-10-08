@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { riskyFiles, summarize } from '../electron/modSecurity';
+import { backgroundSecurityPass, initSecurityStore, riskyFiles, summarize } from '../electron/modSecurity';
 import type { ModSecurityReport } from '../shared/types';
-import { tempHome, write } from './helpers';
+import { mod, tempHome, write } from './helpers';
 
 let env: ReturnType<typeof tempHome>;
 beforeEach(() => {
@@ -51,4 +51,21 @@ describe('verdicts', () => {
     expect(summarize(base({ archive: { path: 'a.7z', sha256: 'x', virusTotal: vt(0) } }))).toBe('clean');
     expect(summarize(undefined)).toBe('unchecked');
   });
+});
+
+describe('check all', () => {
+  it('only checks mods that contain programs/DLLs/scripts, and reports progress', async () => {
+    initSecurityStore(env.home);
+    const withDll = path.join(env.home, 'a');
+    const plain = path.join(env.home, 'b');
+    write(path.join(withDll, 'plugin.dll'), 'x');
+    write(path.join(plain, 'texture.dds'), 'x');
+    const mods = [mod({ id: 'a', gameId: 'g', localPath: withDll }), mod({ id: 'b', gameId: 'g', localPath: plain })];
+    const seen: string[] = [];
+    const r = await backgroundSecurityPass(mods, undefined, '9999', (_d, _t, cur) => cur && seen.push(cur), { allWithExecutables: true });
+    expect(r).toMatchObject({ checked: 1, total: 1, stopped: false });
+    expect(seen).toEqual(['a']);
+    // A second run has nothing left to do.
+    expect((await backgroundSecurityPass(mods, undefined, '9999', undefined, { allWithExecutables: true })).total).toBe(0);
+  }, 120_000);
 });

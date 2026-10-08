@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { CatalogSnapshot, HubSettings } from '@shared/types';
+import type { CatalogSnapshot, DefenderSweep, HubSettings } from '@shared/types';
 import { isNexusLikeSource } from '../utils/games';
+import { toast } from '../utils/toast';
 
 type Props = {
   catalog: CatalogSnapshot;
@@ -11,6 +12,19 @@ export function SettingsView({ catalog, onSaved }: Props) {
   const [settings, setSettings] = useState<HubSettings | null>(null);
   const [nexusKey, setNexusKey] = useState('');
   const [vtKey, setVtKey] = useState('');
+  const [sweep, setSweep] = useState<DefenderSweep | null>(null);
+  useEffect(() => {
+    void window.modHub?.getLastSweep?.().then(setSweep);
+  }, []);
+  const [secProgress, setSecProgress] = useState<{ done: number; total: number; current: string; running: boolean } | null>(null);
+  useEffect(
+    () =>
+      window.modHub?.onSecurityProgress?.((p) => {
+        setSecProgress(p);
+        if (!p.running) void window.modHub?.getLastSweep?.().then(setSweep);
+      }),
+    [],
+  );
   const [message, setMessage] = useState('');
 
   async function saveBg(partial: Partial<HubSettings>) {
@@ -135,6 +149,14 @@ export function SettingsView({ catalog, onSaved }: Props) {
           />
           Check new and changed mods automatically (after scans)
         </label>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.isaacLuaDebugGuard !== false}
+            onChange={(e) => void saveBg({ isaacLuaDebugGuard: e.target.checked })}
+          />
+          Keep Isaac LuaDebug off (REPENTOGON setting; mods that need it get flagged)
+        </label>
         <label>
           VirusTotal API key (free at virustotal.com → profile → API key; 4 lookups/min)
           <input
@@ -145,16 +167,77 @@ export function SettingsView({ catalog, onSaved }: Props) {
             onBlur={() => void saveBg({ virusTotalApiKey: vtKey.trim() || undefined })}
           />
         </label>
-        <button
-          type="button"
-          className="btn"
-          onClick={async () => {
-            const r = await window.modHub?.checkAllExecutableMods();
-            if (r) setMessage(r.message);
-          }}
-        >
-          Check all mods with programs/DLLs now
-        </button>
+        <div className="sec-run">
+          <button
+            type="button"
+            className="btn"
+            disabled={Boolean(secProgress?.running)}
+            onClick={async () => {
+              const r = await window.modHub?.checkAllExecutableMods();
+              if (r) {
+                setMessage(r.message);
+                toast(r.message, r.ok ? 'info' : 'error');
+              }
+            }}
+          >
+            Check all mods with programs/DLLs now
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={Boolean(secProgress?.running)}
+            title="One Microsoft Defender scan per place mods live (Workshop, Vortex, MO2, game mod folders, vault). Archives are scanned inside."
+            onClick={async () => {
+              const r = await window.modHub?.defenderSweep();
+              if (r) toast(r.message, r.ok ? 'info' : 'error');
+            }}
+          >
+            Scan all mod folders (Defender)
+          </button>
+          {secProgress?.running && (
+            <button type="button" className="btn" onClick={() => void window.modHub?.stopSecurityChecks().then((r) => toast(r.message))}>
+              Stop
+            </button>
+          )}
+        </div>
+        {secProgress && secProgress.total > 0 && (
+          <div className="bulk-progress">
+            <div className="bulk-bar">
+              <span style={{ width: `${Math.round((secProgress.done / secProgress.total) * 100)}%` }} />
+            </div>
+            <span>
+              {secProgress.running
+                ? `Checking ${secProgress.done + 1} / ${secProgress.total}${secProgress.current ? `: ${secProgress.current}` : ''}`
+                : `Done: ${secProgress.done} / ${secProgress.total}`}
+            </span>
+          </div>
+        )}
+        {sweep && (
+          <div className="sweep-summary">
+            Last folder scan {new Date(sweep.finishedAt).toLocaleString()}: {sweep.roots.length} folders,{' '}
+            {sweep.threats.length ? <strong className="sec-threat">{sweep.threats.length} threat(s)</strong> : 'nothing found'}
+            {!sweep.complete ? ' (stopped early)' : ''}
+            {sweep.threats.length > 0 && (
+              <ul className="sec-files">
+                {sweep.threats.map((t) => (
+                  <li key={`${t.threat}|${t.file}`}>
+                    <strong>{t.threat}</strong> · {t.modTitle ?? 'not a mod in your library'} · <code>{t.file}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <details>
+              <summary>Folders scanned</summary>
+              <ul className="sec-files">
+                {sweep.roots.map((r) => (
+                  <li key={r.dir}>
+                    {r.label}: {r.status} ({r.seconds}s) · <code>{r.dir}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        )}
 
         <h2>Accounts</h2>
         <p className="message message-compact settings-centered-note">

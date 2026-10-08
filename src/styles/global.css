@@ -2086,3 +2086,19 @@ button.sec-pill {
 .sec-files code {
   font-size: 0.74rem;
 }
+
+.sec-run {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sweep-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
+}
+
+.sweep-summary .sec-threat {
+  color: #f08a7a;
+}

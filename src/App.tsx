@@ -205,7 +205,7 @@ function AppInner() {
   useEffect(() => window.modHub?.onToast?.((t) => toast(t.message, t.kind)), []);
 
   // Malware-check overview (executables per mod + last result), refreshed with the catalog.
-  const [security, setSecurity] = useState<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>>({});
+  const [security, setSecurity] = useState<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string; lua?: string[] }>>({});
   useEffect(() => {
     void window.modHub?.getSecurityOverview?.().then(setSecurity);
   }, [catalog]);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ModRecord, ModSecurityReport, SecurityStatus } from '../shared/types';
 import { downloadDiskPath } from '../shared/modDiskPath';
 import { defenderScan, sha256, virusTotalLookup } from './security';
+import { isaacLuaRisks } from './luaGuard';
 
 /**
  * Malware checks for mods. Executable content (programs, DLL plugins, script-extender plugins, scripts that
@@ -15,7 +16,12 @@ import { defenderScan, sha256, virusTotalLookup } from './security';
 const RISKY = /\.(exe|dll|asi|scr|com|bat|cmd|ps1|vbs|vbe|js|jse|wsf|hta|msi|jar|lnk|sys)$/i;
 const MAX_FILES = 25;
 
-type Store = { reports: Record<string, ModSecurityReport>; inventory: Record<string, { sig: string; risky: string[] }> };
+type Store = {
+  sweep?: import('../shared/types').DefenderSweep;
+  reports: Record<string, ModSecurityReport>;
+  /** risky = program/DLL/script files; lua = blocked Lua APIs used (Isaac: only work with LuaDebug on). */
+  inventory: Record<string, { sig: string; risky: string[]; lua?: string[] }>;
+};
 
 let storePath = '';
 export function initSecurityStore(userData: string): void {
@@ -25,7 +31,7 @@ export function initSecurityStore(userData: string): void {
 function load(): Store {
   try {
     const s = JSON.parse(fs.readFileSync(storePath, 'utf8')) as Store;
-    return { reports: s.reports ?? {}, inventory: s.inventory ?? {} };
+    return { reports: s.reports ?? {}, inventory: s.inventory ?? {}, sweep: s.sweep };
   } catch {
     return { reports: {}, inventory: {} };
   }
@@ -154,7 +160,7 @@ export async function checkMod(m: ModRecord, apiKey: string | undefined, opts: {
   return report;
 }
 
-export type SecurityOverview = Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>;
+export type SecurityOverview = Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string; lua?: string[] }>;
 
 /** Card-level view for every mod: executable count (inventory) and the last check's status. */
 export function securityOverview(): SecurityOverview {
@@ -167,6 +173,7 @@ export function securityOverview(): SecurityOverview {
       executables: inv.risky.length,
       stale: Boolean(r && r.signature.split('|')[0] !== inv.sig),
       checkedAt: r?.checkedAt,
+      lua: inv.lua?.length ? inv.lua : undefined,
     };
   }
   return out;
@@ -186,8 +193,10 @@ export async function backgroundSecurityPass(
   mods: ModRecord[],
   apiKey: string | undefined,
   baselineIso: string,
-  onProgress?: (done: number, total: number) => void,
-): Promise<{ inventoried: number; checked: number; threats: number }> {
+  onProgress?: (done: number, total: number, current: string) => void,
+  /** "Check all": every mod that contains programs/DLLs/scripts and has no current result. */
+  opts: { allWithExecutables?: boolean; shouldStop?: () => boolean } = {},
+): Promise<{ inventoried: number; checked: number; threats: number; total: number; stopped: boolean }> {
   const s = load();
   let inventoried = 0;
   for (const m of mods) {
@@ -195,8 +204,10 @@ export async function backgroundSecurityPass(
     if (!root) continue;
     try {
       const { files, sig } = riskyFiles(root);
-      if (s.inventory[m.id]?.sig !== sig) {
-        s.inventory[m.id] = { sig, risky: files.slice(0, 50).map((f) => f.rel) };
+      const lua = m.gameId === 'binding-of-isaac' && fs.statSync(root).isDirectory() ? isaacLuaRisks(root) : undefined;
+      const prev = s.inventory[m.id];
+      if (prev?.sig !== sig || JSON.stringify(prev?.lua ?? []) !== JSON.stringify(lua ?? [])) {
+        s.inventory[m.id] = { sig, risky: files.slice(0, 50).map((f) => f.rel), lua: lua?.length ? lua : undefined };
         inventoried += 1;
       }
     } catch {
@@ -209,13 +220,43 @@ export async function backgroundSecurityPass(
     const r = s.reports[m.id];
     if (!inv) return false;
     if (r) return r.signature.split('|')[0] !== inv.sig; // files changed since the last check
+    if (opts.allWithExecutables) return inv.risky.length > 0;
     return (m.installedAt ?? '') > baselineIso; // new since the feature was turned on
   });
   let threats = 0;
+  let checked = 0;
   for (let i = 0; i < due.length; i++) {
-    onProgress?.(i, due.length);
+    if (opts.shouldStop?.()) return { inventoried, checked, threats, total: due.length, stopped: true };
+    onProgress?.(i, due.length, due[i].title);
     const r = await checkMod(due[i], apiKey, { maxVt: 4 });
+    checked += 1;
     if (r.status === 'threat' || r.status === 'flagged') threats += 1;
   }
-  return { inventoried, checked: due.length, threats };
+  onProgress?.(due.length, due.length, '');
+  return { inventoried, checked, threats, total: due.length, stopped: false };
+}
+
+/** Save a folder sweep; mods with a Defender finding get a "threat" report (shown on their card). */
+export function recordSweep(sweep: import('../shared/types').DefenderSweep): void {
+  const s = load();
+  s.sweep = sweep;
+  for (const t of sweep.threats) {
+    if (!t.modId) continue;
+    const prev = s.reports[t.modId];
+    s.reports[t.modId] = {
+      modId: t.modId,
+      checkedAt: sweep.finishedAt,
+      defender: { status: 'threat', detail: `${t.threat}: ${t.file}` },
+      archive: prev?.archive,
+      executables: prev?.executables ?? [],
+      executableCount: prev?.executableCount ?? 0,
+      signature: prev?.signature ?? '',
+      status: 'threat',
+    };
+  }
+  save(s);
+}
+
+export function lastSweep(): import('../shared/types').DefenderSweep | undefined {
+  return load().sweep;
 }

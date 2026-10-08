@@ -54,6 +54,14 @@ const modHub: IpcApi = {
   getSecurityReport: (modId: string) => ipcRenderer.invoke('modhub:getSecurityReport', modId),
   getSecurityOverview: () => ipcRenderer.invoke('modhub:getSecurityOverview'),
   checkAllExecutableMods: () => ipcRenderer.invoke('modhub:checkAllExecutableMods'),
+  stopSecurityChecks: () => ipcRenderer.invoke('modhub:stopSecurityChecks'),
+  defenderSweep: () => ipcRenderer.invoke('modhub:defenderSweep'),
+  getLastSweep: () => ipcRenderer.invoke('modhub:getLastSweep'),
+  onSecurityProgress: (handler: (p: { done: number; total: number; current: string; running: boolean }) => void) => {
+    const listener = (_e: unknown, p: { done: number; total: number; current: string; running: boolean }) => handler(p);
+    ipcRenderer.on('modhub:security-progress', listener);
+    return () => ipcRenderer.removeListener('modhub:security-progress', listener);
+  },
   openVirusTotal: (hash: string) => ipcRenderer.invoke('modhub:openVirusTotal', hash),
   getSteamUpdates: (appIds: number[]) => ipcRenderer.invoke('modhub:getSteamUpdates', appIds),
   setIsaacFolderEnabled: (folder: string, enabled: boolean) => ipcRenderer.invoke('modhub:setIsaacFolderEnabled', folder, enabled),

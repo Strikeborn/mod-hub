@@ -13,7 +13,9 @@ import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
 import { planPzOrder } from './pzDeps';
-import { backgroundSecurityPass, checkMod, initSecurityStore, securityOverview, securityReport } from './modSecurity';
+import { enforceLuaDebugOff, isaacLuaDebugState } from './luaGuard';
+import { backgroundSecurityPass, checkMod, initSecurityStore, lastSweep, recordSweep, securityOverview, securityReport } from './modSecurity';
+import { defenderSweep } from './defenderSweep';
 import { findMo2Instances, launchPlayOption, playOptions, steamUpdateState } from './playPaths';
 import { analyzeIsaacConflicts } from './isaacConflicts';
 import { applyWorkshopArchive } from './workshopArchive';
@@ -561,6 +563,18 @@ function registerIpc() {
     cat.games = catalogGamesFor(cat.mods);
     if (JSON.stringify(cat.games) !== gamesBefore) dirty = true;
     if (dirty) store.saveCatalog(cat);
+    // Isaac LuaDebug guard: switch REPENTOGON's LuaDebug back off if something turned it on.
+    if (store.loadSettings().isaacLuaDebugGuard !== false && enforceLuaDebugOff()) {
+      console.log('[Mod Hub] Isaac LuaDebug was on; switched it back off (backup in mod-hub\\backups).');
+      setTimeout(
+        () =>
+          mainWindow?.webContents.send('modhub:toast', {
+            message: 'Isaac LuaDebug was turned on (no Lua sandbox for any mod). Mod Hub switched it back off.',
+            kind: 'error',
+          }),
+        1500,
+      );
+    }
     const bySource = cat.mods.reduce<Record<string, number>>((a, m) => ((a[m.source] = (a[m.source] ?? 0) + 1), a), {});
     console.log(
       `[Mod Hub] Catalog loaded: ${cat.mods.length} mods across ${new Set(cat.mods.map((m) => m.gameId)).size} games (${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(', ')})${dirty ? ' - saved fixes' : ''}`,
@@ -584,8 +598,10 @@ function registerIpc() {
 
   // Malware checks: new/changed mods in the background, one mod or all-with-executables on request.
   let securityRunning = false;
+  let securityStop = false;
   const securityPass = async (all = false) => {
     if (securityRunning) return;
+    securityStop = false;
     const settings = store.loadSettings();
     if (!all && settings.securityAutoCheck === false) return;
     if (!settings.securityBaseline) store.saveSettings({ securityBaseline: new Date().toISOString() });
@@ -593,8 +609,32 @@ function registerIpc() {
     try {
       const mods = store.loadCatalog().mods;
       const baseline = all ? '' : (store.loadSettings().securityBaseline ?? new Date().toISOString());
-      const r = await backgroundSecurityPass(mods, settings.virusTotalApiKey, baseline);
-      console.log(`[Mod Hub] Malware checks: ${r.inventoried} inventories refreshed, ${r.checked} mod(s) checked, ${r.threats} with findings`);
+      const send = (done: number, total: number, current: string) =>
+        mainWindow?.webContents.send('modhub:security-progress', { done, total, current, running: done < total });
+      const r = await backgroundSecurityPass(
+        mods,
+        settings.virusTotalApiKey,
+        baseline,
+        (done, total, current) => {
+          send(done, total, current);
+          if (done % 10 === 0 && done < total) console.log(`[Mod Hub] Malware check ${done}/${total}: ${current}`);
+        },
+        { allWithExecutables: all, shouldStop: () => securityStop },
+      );
+      mainWindow?.webContents.send('modhub:security-progress', { done: r.checked, total: r.total, current: '', running: false });
+      console.log(
+        `[Mod Hub] Malware checks${r.stopped ? ' (stopped)' : ''}: ${r.inventoried} inventories refreshed, ${r.checked}/${r.total} mod(s) checked, ${r.threats} with findings`,
+      );
+      if (all || r.checked) {
+        mainWindow?.webContents.send('modhub:toast', {
+          message: r.stopped
+            ? `Malware check stopped after ${r.checked} of ${r.total} mods.`
+            : r.total === 0
+              ? 'Malware check: every mod with programs/DLLs already has a current result.'
+              : `Malware check done: ${r.checked} mod(s), ${r.threats ? `${r.threats} flagged` : 'nothing found'}.`,
+          kind: r.threats ? 'error' : 'ok',
+        });
+      }
       if (r.checked || r.inventoried) mainWindow?.webContents.send('modhub:catalog-updated');
       if (r.threats) {
         mainWindow?.webContents.send('modhub:toast', {
@@ -617,9 +657,51 @@ function registerIpc() {
   ipcMain.handle('modhub:getSecurityReport', (_e, modId: string) => securityReport(modId) ?? null);
   ipcMain.handle('modhub:getSecurityOverview', () => securityOverview());
   ipcMain.handle('modhub:checkAllExecutableMods', () => {
-    if (securityRunning) return { ok: false, message: 'A malware check is already running.' };
+    if (securityRunning) return { ok: false, message: 'A malware check is already running (see the progress bar).' };
     void securityPass(true);
-    return { ok: true, message: 'Checking every mod that contains programs, DLLs or scripts in the background…' };
+    return { ok: true, message: 'Checking every mod that contains programs, DLLs or scripts…' };
+  });
+  ipcMain.handle('modhub:defenderSweep', () => {
+    if (securityRunning) return { ok: false, message: 'A malware check is already running (see the progress bar).' };
+    securityRunning = true;
+    securityStop = false;
+    void (async () => {
+      try {
+        const mods = store.loadCatalog().mods;
+        const sweep = await defenderSweep(
+          mods,
+          app.getPath('userData'),
+          (done, total, current) => {
+            mainWindow?.webContents.send('modhub:security-progress', { done, total, current, running: done < total });
+            if (current) console.log(`[Mod Hub] Defender sweep ${done + 1}/${total}: ${current}`);
+          },
+          () => securityStop,
+        );
+        recordSweep(sweep);
+        const secs = sweep.roots.reduce((a, r) => a + r.seconds, 0);
+        const unavailable = sweep.roots.filter((r) => r.status === 'unavailable').length;
+        console.log(`[Mod Hub] Defender sweep: ${sweep.roots.length} folders in ${secs}s, ${sweep.threats.length} threat(s)`);
+        mainWindow?.webContents.send('modhub:security-progress', { done: sweep.roots.length, total: sweep.roots.length, current: '', running: false });
+        mainWindow?.webContents.send('modhub:toast', {
+          message: sweep.threats.length
+            ? `Defender found ${sweep.threats.length} threat(s) in mod folders. See Settings → Malware checks.`
+            : `Defender scanned ${sweep.roots.length} mod folders in ${secs}s: nothing found${unavailable ? ` (${unavailable} couldn't be scanned)` : ''}.`,
+          kind: sweep.threats.length ? 'error' : 'ok',
+        });
+        mainWindow?.webContents.send('modhub:catalog-updated');
+      } catch (e) {
+        console.warn('[Mod Hub] Defender sweep failed:', e);
+      } finally {
+        securityRunning = false;
+      }
+    })();
+    return { ok: true, message: 'Scanning every mod folder with Microsoft Defender…' };
+  });
+  ipcMain.handle('modhub:getLastSweep', () => lastSweep() ?? null);
+
+  ipcMain.handle('modhub:stopSecurityChecks', () => {
+    securityStop = true;
+    return { ok: true, message: 'Stopping after the current mod…' };
   });
   ipcMain.handle('modhub:openVirusTotal', (_e, hash: string) => {
     if (!/^[0-9a-f]{64}$/i.test(hash)) return;
@@ -642,6 +724,15 @@ function registerIpc() {
       if (inc) warnings.push(`${inc} incompatible/duplicate pair(s) enabled.`);
     }
     if (gameId === 'binding-of-isaac') {
+      const lua = isaacLuaDebugState();
+      if (lua.launcher && settings.isaacLuaDebugGuard !== false && enforceLuaDebugOff()) {
+        warnings.push('REPENTOGON had LuaDebug on (no Lua sandbox for any mod). Mod Hub switched it back off.');
+      } else if (lua.launcher) {
+        warnings.push('LuaDebug is ON in REPENTOGON: every enabled mod can read/write files and run programs.');
+      }
+      if (lua.steamOption) {
+        warnings.push('Steam launch options for Isaac contain --luadebug (no Lua sandbox). Remove it in Steam → Isaac → Properties.');
+      }
       const c = analyzeIsaacConflicts(mods);
       const heavy = c.pairs.filter((p) => p.fileCount >= 50).length;
       if (heavy) warnings.push(`${heavy} pair(s) of enabled mods replace 50+ of the same files (see ⚠ file conflicts).`);

@@ -53,7 +53,7 @@ export function defenderScan(target: string): Promise<SecurityDefender> {
       clearTimeout(timer);
       const last = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? '';
       if (code === 0) resolve({ status: 'clean', detail: last });
-      else if (code === 2) resolve({ status: 'threat', detail: out.trim().slice(-600) });
+      else if (code === 2) resolve({ status: 'threat', detail: out.trim().slice(-50_000) });
       // Defender switched off entirely, or the scan failed.
       else resolve({ status: 'unavailable', detail: last || `MpCmdRun exited with ${code}` });
     });

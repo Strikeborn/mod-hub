@@ -22,7 +22,7 @@ type Props = {
   /** Isaac: resource files this mod wins/loses against other enabled mods. */
   conflict?: IsaacConflicts['perMod'][string];
   /** Malware-check overview for this mod. */
-  security?: { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string };
+  security?: { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string; lua?: string[] };
   games: GameRecord[];
   variant?: 'steam' | 'nexus' | 'library';
   trackedNexus?: Set<string>;
@@ -189,6 +189,15 @@ export const ModCard = memo(function ModCard({
                       : `${security.executables} exe/DLL · not checked`}
               {security.stale ? ' · changed' : ''}
             </button>
+          )}
+          {security?.lua && (
+            <span
+              className="status-pill sec-pill sec-flagged"
+              title={`This mod's scripts use: ${security.lua.join(', ')}. Isaac blocks these unless LuaDebug is on, which removes the sandbox for every mod. Mod Hub keeps LuaDebug off.`}
+            >
+              ⚠ Wants LuaDebug ({security.lua[0].split(' (')[0]}
+              {security.lua.length > 1 ? ` +${security.lua.length - 1}` : ''})
+            </span>
           )}
           {conflict && conflict.losses > 0 && (
             <span

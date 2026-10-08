@@ -9,7 +9,7 @@ type Props = {
   /** Isaac file conflicts per catalog mod id. */
   conflicts?: IsaacConflicts['perMod'];
   /** Malware-check overview per mod id. */
-  security?: Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>;
+  security?: Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string; lua?: string[] }>;
   onOrderSort?: (active: boolean) => void;
   mods: ModRecord[];
   games: GameRecord[];

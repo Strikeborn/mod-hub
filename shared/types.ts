@@ -207,6 +207,8 @@ export interface HubSettings {
   /** Malware checks: VirusTotal key (hash lookups only, never uploads), automatic checks of new/changed mods. */
   virusTotalApiKey?: string;
   securityAutoCheck?: boolean;
+  /** Isaac: switch REPENTOGON's LuaDebug back off whenever it's found on (default on). */
+  isaacLuaDebugGuard?: boolean;
   /** Mods installed before this date aren't auto-scanned (set when checks were first enabled). */
   securityBaseline?: string;
   /** Play: last launch method (and MO2 profile) per game. */
@@ -249,6 +251,15 @@ export interface ModSecurityReport {
   executableCount: number;
   signature: string;
   status: SecurityStatus;
+}
+
+/** Result of "Scan all mod folders" (one Defender scan per mod location). */
+export interface DefenderSweep {
+  startedAt: string;
+  finishedAt: string;
+  complete: boolean;
+  roots: { label: string; dir: string; status: SecurityDefender['status']; seconds: number }[];
+  threats: { threat: string; file: string; modId?: string; modTitle?: string }[];
 }
 
 /** One way to start a game (best first). */
@@ -487,10 +498,15 @@ export type IpcApi = {
   checkModSecurity: (modId: string) => Promise<ModSecurityReport | { error: string }>;
   getSecurityReport: (modId: string) => Promise<ModSecurityReport | null>;
   /** Per mod: last status, executable count, whether files changed since. */
-  getSecurityOverview: () => Promise<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>>;
+  getSecurityOverview: () => Promise<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string; lua?: string[] }>>;
   /** Check every mod that contains programs/DLLs/scripts (background; progress via toasts). */
   checkAllExecutableMods: () => Promise<{ ok: boolean; message: string }>;
   openVirusTotal: (sha256: string) => Promise<void>;
+  stopSecurityChecks: () => Promise<{ ok: boolean; message: string }>;
+  /** Defender scan of every mod location (background; progress via onSecurityProgress). */
+  defenderSweep: () => Promise<{ ok: boolean; message: string }>;
+  getLastSweep: () => Promise<DefenderSweep | null>;
+  onSecurityProgress: (handler: (p: { done: number; total: number; current: string; running: boolean }) => void) => () => void;
   /** Installed Steam games with an update waiting (appId -> download size). */
   getSteamUpdates: (appIds: number[]) => Promise<Record<number, { bytes?: number }>>;
   /** Isaac: add/remove disable.it for one mods folder (game must be closed). */
