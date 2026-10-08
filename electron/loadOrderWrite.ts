@@ -18,6 +18,18 @@ export const GAME_EXE: Record<string, { exe: string; name: string }> = {
   'project-zomboid': { exe: 'ProjectZomboid64.exe', name: 'Project Zomboid' },
 };
 
+/** Running-process names for games Mod Hub can launch but doesn't write mod lists for. */
+export const PLAY_EXE: Record<string, string[]> = {
+  'binding-of-isaac': ['isaac-ng.exe'],
+  rimworld: ['RimWorldWin64.exe'],
+  'project-zomboid': ['ProjectZomboid64.exe'],
+  skyrimse: ['SkyrimSE.exe'],
+  cyberpunk2077: ['Cyberpunk2077.exe'],
+  baldursgate3: ['bg3.exe', 'bg3_dx11.exe'],
+  fallout4: ['Fallout4.exe'],
+  terraria: ['Terraria.exe'],
+};
+
 export function isRunning(exe: string): boolean {
   try {
     const out = execFileSync('tasklist', ['/FI', `IMAGENAME eq ${exe}`, '/NH'], { encoding: 'utf8', windowsHide: true });
@@ -150,6 +162,19 @@ function listSet(gameId: string, list: ListFile | null, mods: ModRecord[], enabl
   const note = noId.length ? ` ${noId.length} skipped (no mod id): ${noId.slice(0, 3).join(', ')}` : '';
   const where = enabled && changed ? ' New ones were added at the end of the load order.' : '';
   return { ok: true, message: `${enabled ? 'Enabled' : 'Disabled'} ${changed} mod(s).${where}${note}`, changed };
+}
+
+/** Isaac: toggle one folder in the game's mods folder by name (used for leftover copies of renamed mods). */
+export function setIsaacFolderEnabled(folder: string, enabled: boolean): EnableResult {
+  if (isRunning(GAME_EXE['binding-of-isaac'].exe)) return { ok: false, message: 'Isaac is running. Close it first.', changed: 0 };
+  const modsDir = isaacModsDir();
+  if (!modsDir || folder.includes('..') || /[\\/]/.test(folder) || !fs.existsSync(path.join(modsDir, folder))) {
+    return { ok: false, message: 'Mod folder not found.', changed: 0 };
+  }
+  const flag = path.join(modsDir, folder, 'disable.it');
+  if (enabled && fs.existsSync(flag)) fs.rmSync(flag, { force: true });
+  else if (!enabled && !fs.existsSync(flag)) fs.writeFileSync(flag, '');
+  return { ok: true, message: `${enabled ? 'Enabled' : 'Disabled'} ${folder}.`, changed: 1 };
 }
 
 export function setModsEnabled(gameId: string, mods: ModRecord[], enabled: boolean): EnableResult {

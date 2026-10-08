@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { GameLoadOrder, ModLoadState, ModRecord } from '../shared/types';
 import { steamGameDir } from './workshopActions';
+import { findMo2Instances, readMo2Modlist, readMo2Plugins } from './mo2';
 
 /**
  * Read-only load-order adapters. Each reads the game's OWN config (what the game will actually load),
@@ -200,7 +201,31 @@ const baldursGate3: Adapter = (mods) => {
   return out;
 };
 
-const ADAPTERS: Adapter[] = [rimworld, projectZomboid, isaac, baldursGate3];
+// Mod Organizer 2 (e.g. Skyrim SE): the instance's selected profile. modlist.txt's first line is the highest
+// priority; shown as load order 1 = lowest so later entries override earlier ones, like the other games.
+const mo2Profiles: Adapter = (mods) => {
+  const inst = findMo2Instances().find((i) => i.gameId && mods.some((m) => m.mo2?.instance === i.root));
+  if (!inst?.gameId) return null;
+  const profile = inst.selectedProfile ?? inst.profiles[0];
+  if (!profile) return null;
+  const file = path.join(inst.root, 'profiles', profile, 'modlist.txt');
+  const out = base(inst.gameId, `MO2 profile “${profile}” (managed by MO2, read-only)`, file, 'list');
+  out.readOnly = true;
+  const list = readMo2Modlist(inst, profile).filter((e) => !e.unmanaged).reverse();
+  const enabled = list.filter((e) => e.enabled);
+  const pos = new Map(enabled.map((e, i) => [e.name.toLowerCase(), i + 1]));
+  for (const m of mods) {
+    if (m.mo2?.instance !== inst.root) continue;
+    const p = pos.get(m.mo2.name.toLowerCase());
+    out.mods[m.id] = p ? { enabled: true, position: p, readOnly: true } : { enabled: false, readOnly: true };
+  }
+  out.enabledCount = enabled.length;
+  const plugins = readMo2Plugins(inst, profile);
+  if (plugins.length) out.unmatched.push({ id: `${plugins.filter((p) => p.active).length}/${plugins.length} plugins active`, position: 0, note: 'plugins.txt' });
+  return out;
+};
+
+const ADAPTERS: Adapter[] = [rimworld, projectZomboid, isaac, baldursGate3, mo2Profiles];
 
 export function readLoadOrders(mods: ModRecord[]): Record<string, GameLoadOrder> {
   const out: Record<string, GameLoadOrder> = {};

@@ -11,14 +11,25 @@ import { listInstalledSteamAppIds } from './steamLibraryApps';
 import { GAMES_REGISTRY, gameById, gameBySteamAppId } from './gamesRegistry';
 import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
-import { readLoadOrders } from './loadOrder';
+import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
+import { planPzOrder } from './pzDeps';
+import { findMo2Instances, launchPlayOption, playOptions, steamUpdateState } from './playPaths';
 import { analyzeIsaacConflicts } from './isaacConflicts';
 import { applyWorkshopArchive } from './workshopArchive';
 import { findWorkshopReuploads, refreshWorkshopVotes } from './workshopCommunity';
 import { checkNexusUpdates } from './nexusUpdates';
-import { setLoadOrder, setModsEnabled } from './loadOrderWrite';
+import { PLAY_EXE, isRunning, setIsaacFolderEnabled, setLoadOrder, setModsEnabled } from './loadOrderWrite';
 import { planRimworldOrder, readRimworldActive } from './rimworldSort';
-import { applyLoadout, deleteLoadout, getLoadouts, saveCurrentLoadout, updateLoadout } from './loadouts';
+import {
+  applyLoadout,
+  applyLoadoutToPzSave,
+  deleteLoadout,
+  exportLoadoutCode,
+  getLoadouts,
+  importLoadoutCode,
+  saveCurrentLoadout,
+  updateLoadout,
+} from './loadouts';
 import { keepWorkshopCopy, keptModId, runSteamWorkshopAction, runSteamWorkshopBatch } from './workshopActions';
 import { getModChanges } from './modChanges';
 import { findCrossPlatform } from './crossPlatform';
@@ -68,6 +79,9 @@ import {
 } from './nexusApi';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Same data folder for the installed app ("Mod Hub") and dev builds ("mod-hub"): %APPDATA%\mod-hub.
+app.setPath('userData', path.join(app.getPath('appData'), 'mod-hub'));
 
 let store: CatalogStore;
 let mainWindow: BrowserWindow | null = null;
@@ -162,6 +176,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'Mod Hub',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     show: false,
     webPreferences: {
       preload,
@@ -342,8 +357,11 @@ function registerIpc() {
   let nexusUpdateRunning = false;
   const nexusUpdateCheck = async (force: boolean) => {
     if (nexusUpdateRunning) return;
-    const last = store.loadSettings().lastNexusUpdateCheck;
-    if (!force && last && Date.now() - Date.parse(last) < 6 * 60 * 60 * 1000) return;
+    const s0 = store.loadSettings();
+    if (s0.nexusUpdateChecksEnabled === false) return;
+    const last = s0.lastNexusUpdateCheck;
+    const hours = Math.max(1, s0.nexusUpdateIntervalHours ?? 6);
+    if (!force && last && Date.now() - Date.parse(last) < hours * 60 * 60 * 1000) return;
     nexusUpdateRunning = true;
     try {
       const cat = store.loadCatalog();
@@ -381,14 +399,15 @@ function registerIpc() {
     try {
       const settings = store.loadSettings();
       const votesDue =
-        afterScan || !settings.lastWorkshopVotesAt || Date.now() - Date.parse(settings.lastWorkshopVotesAt) > 20 * 60 * 60 * 1000;
+        settings.workshopRatingsEnabled !== false &&
+        (afterScan || !settings.lastWorkshopVotesAt || Date.now() - Date.parse(settings.lastWorkshopVotesAt) > 20 * 60 * 60 * 1000);
       const cat = store.loadCatalog();
       let changed = 0;
       if (votesDue) {
         changed += await refreshWorkshopVotes(cat.mods, steamHelperPath());
         if (cat.mods.some((m) => m.workshopVotesAt)) store.saveSettings({ lastWorkshopVotesAt: new Date().toISOString() });
       }
-      const reuploads = await findWorkshopReuploads(cat.mods, steamHelperPath());
+      const reuploads = settings.reuploadSearchEnabled === false ? 0 : await findWorkshopReuploads(cat.mods, steamHelperPath());
       changed += reuploads;
       if (changed > 0) {
         // Merge onto the latest catalog so a concurrent change isn't lost.
@@ -548,14 +567,104 @@ function registerIpc() {
   ipcMain.handle('modhub:getLoadOrders', () => readLoadOrders(store.loadCatalog().mods));
   ipcMain.handle('modhub:getIsaacConflicts', () => analyzeIsaacConflicts(store.loadCatalog().mods));
 
+  ipcMain.handle('modhub:setIsaacFolderEnabled', (_e, folder: string, enabled: boolean) => setIsaacFolderEnabled(folder, enabled));
+
+  ipcMain.handle('modhub:getSteamUpdates', (_e, appIds: number[]) => {
+    const out: Record<number, { bytes?: number }> = {};
+    for (const id of appIds) {
+      const s = steamUpdateState(id);
+      if (s?.pending) out[id] = { bytes: s.bytes };
+    }
+    return out;
+  });
+
+  ipcMain.handle('modhub:getPlayInfo', (_e, gameId: string) => {
+    const settings = store.loadSettings();
+    const options = playOptions(gameId);
+    const running = (PLAY_EXE[gameId] ?? []).some((exe) => isRunning(exe));
+    const mods = store.loadCatalog().mods;
+    const warnings: string[] = [];
+    if (gameId === 'rimworld') {
+      const plan = planRimworldOrder(readRimworldActive(), mods);
+      const order = plan.issues.filter((i) => i.kind === 'order').length;
+      const deps = plan.issues.filter((i) => i.kind === 'dependency-missing' || i.kind === 'dependency-off').length;
+      if (order) warnings.push(`${order} mod(s) are out of order. Auto-sort in All mods fixes it.`);
+      if (deps) warnings.push(`${deps} dependency problem(s) (missing or disabled).`);
+      const inc = plan.issues.filter((i) => i.kind === 'incompatible' || i.kind === 'duplicate-id').length;
+      if (inc) warnings.push(`${inc} incompatible/duplicate pair(s) enabled.`);
+    }
+    if (gameId === 'binding-of-isaac') {
+      const c = analyzeIsaacConflicts(mods);
+      const heavy = c.pairs.filter((p) => p.fileCount >= 50).length;
+      if (heavy) warnings.push(`${heavy} pair(s) of enabled mods replace 50+ of the same files (see ⚠ file conflicts).`);
+    }
+    if (gameId === 'skyrimse' && findMo2Instances().some((i) => i.gameId === 'skyrimse') && mods.some((m) => m.gameId === 'skyrimse' && (m.source === 'nexus' || m.source === 'vortex-staging'))) {
+      warnings.push('Skyrim mods come from both MO2 and Vortex. Vortex deploys into the game folder (MO2 shows those as “Unmanaged”), so both sets load when you play through MO2.');
+    }
+    const appId = gameById(gameId)?.steamAppId ?? (Number(/^steam-(\d+)$/.exec(gameId)?.[1]) || undefined);
+    const upd = appId ? steamUpdateState(appId) : null;
+    if (upd?.pending) {
+      const size = upd.bytes ? ` (${(upd.bytes / 1e9).toFixed(1)} GB)` : '';
+      const nonSteam = options.some((o) => o.kind !== 'steam');
+      warnings.push(
+        `Steam has an update waiting for this game${size}. Launching through Steam installs it first, which can break script-extender and version-specific mods.${nonSteam ? ' MO2 / SKSE / REPENTOGON launches skip it.' : ''}${upd.autoUpdate === 'always' ? ' To stop Steam scheduling it: game Properties → Updates → "Only update this game when I launch it".' : ''}`,
+      );
+    }
+    const choice = settings.playChoices?.[gameId];
+    return {
+      steamUpdatePending: upd?.pending ? { bytes: upd.bytes, autoUpdate: upd.autoUpdate } : undefined,
+      gameId,
+      options,
+      chosenId: choice && options.some((o) => o.id === choice.optionId) ? choice.optionId : options.find((o) => o.recommended)?.id,
+      chosenProfile: choice?.profile,
+      running,
+      warnings,
+    };
+  });
+
+  ipcMain.handle('modhub:playGame', async (_e, gameId: string, optionId: string, profile?: string) => {
+    if ((PLAY_EXE[gameId] ?? []).some((exe) => isRunning(exe))) return { ok: false, message: 'The game is already running.' };
+    const opt = playOptions(gameId).find((o) => o.id === optionId);
+    if (!opt) return { ok: false, message: 'That launch option is no longer available.' };
+    const settings = store.loadSettings();
+    store.saveSettings({ playChoices: { ...(settings.playChoices ?? {}), [gameId]: { optionId, profile } } });
+    console.log(`[Mod Hub] Play ${gameId} via ${opt.label}${profile ? ` (profile ${profile})` : ''}`);
+    return launchPlayOption(opt, profile);
+  });
+
   ipcMain.handle('modhub:getLoadouts', (_e, gameId: string) => getLoadouts(gameId, store.loadCatalog().mods));
-  ipcMain.handle('modhub:applyLoadout', (_e, gameId: string, id: string) => applyLoadout(gameId, id, store.loadCatalog().mods));
+  ipcMain.handle('modhub:applyLoadout', (_e, gameId: string, id: string) => {
+    if (id.startsWith('mo2:')) {
+      // MO2 owns its profiles: "apply" = launch Play with this profile.
+      const profile = id.slice(4);
+      const opt = playOptions(gameId).find((o) => o.kind === 'mo2' && o.recommended) ?? playOptions(gameId).find((o) => o.kind === 'mo2');
+      if (!opt) return { ok: false, message: 'MO2 launch option not found.' };
+      const settings = store.loadSettings();
+      store.saveSettings({ playChoices: { ...(settings.playChoices ?? {}), [gameId]: { optionId: opt.id, profile } } });
+      return { ok: true, message: `▶ Play will start ${opt.label} with MO2 profile “${profile}”.` };
+    }
+    return applyLoadout(gameId, id, store.loadCatalog().mods);
+  });
   ipcMain.handle('modhub:saveLoadout', (_e, gameId: string, name: string) => saveCurrentLoadout(gameId, name, store.loadCatalog().mods));
+  ipcMain.handle('modhub:applyLoadoutToSave', (_e, id: string, saveId: string) => applyLoadoutToPzSave(id, saveId, store.loadCatalog().mods));
+  ipcMain.handle('modhub:exportLoadoutCode', (_e, gameId: string, id: string) => exportLoadoutCode(gameId, id, store.loadCatalog().mods));
+  ipcMain.handle('modhub:importLoadoutCode', (_e, code: string) => importLoadoutCode(code, store.loadCatalog().mods));
   ipcMain.handle('modhub:updateLoadout', (_e, gameId: string, id: string) => updateLoadout(gameId, id, store.loadCatalog().mods));
   ipcMain.handle('modhub:deleteLoadout', (_e, gameId: string, id: string) => deleteLoadout(gameId, id, store.loadCatalog().mods));
 
   ipcMain.handle('modhub:planLoadOrder', (_e, gameId: string, order?: string[]) => {
     const mods = store.loadCatalog().mods;
+    if (gameId === 'project-zomboid') {
+      let pzOrder = order;
+      if (!pzOrder) {
+        try {
+          pzOrder = [...fs.readFileSync(pzDefaultModsFile(), 'utf8').matchAll(/^\s*mod\s*=\s*([^,\r\n]+?)\s*,?\s*$/gim)].map((m) => m[1]);
+        } catch {
+          pzOrder = [];
+        }
+      }
+      return planPzOrder(pzOrder, mods);
+    }
     if (gameId !== 'rimworld') return null;
     const current = order ?? readRimworldActive();
     return planRimworldOrder(current, mods);
@@ -679,7 +788,9 @@ function registerIpc() {
     }
   });
 
-  const steamHelperPath = () => path.join(app.getAppPath(), 'electron', 'steam-workshop-helper.cjs');
+  // Packaged: the helper (and steamworks.js) are unpacked next to app.asar so a separate process can run them.
+  const steamHelperPath = () =>
+    path.join(app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked'), 'electron', 'steam-workshop-helper.cjs');
 
   ipcMain.handle('modhub:steamSubscribe', async (_e, appId: number, workshopId: string) => {
     const direct = await runSteamWorkshopAction(steamHelperPath(), 'subscribe', appId, workshopId);
@@ -1074,6 +1185,11 @@ function registerIpc() {
       store.saveSettings({ nexusApiKey: apiKey, nexusConnected: true });
     }
     return result;
+  });
+
+  ipcMain.handle('modhub:openWorkshopSearch', (_e, appId: number, text: string) => {
+    const url = `https://steamcommunity.com/workshop/browse/?appid=${Number(appId)}&searchtext=${encodeURIComponent(String(text).slice(0, 120))}`;
+    return shell.openExternal(`steam://openurl/${url}`);
   });
 
   ipcMain.handle('modhub:openPath', (_e, filePath: string) => {

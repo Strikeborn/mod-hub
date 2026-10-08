@@ -36,12 +36,31 @@ function listFiles(root: string, prefix: string, out: string[]): void {
 
 export function analyzeIsaacConflicts(mods: ModRecord[]): IsaacConflicts {
   const modsDir = isaacModsDir();
-  if (!modsDir) return { pairs: [], perMod: {}, filesChecked: 0, modsChecked: 0 };
+  if (!modsDir) return { pairs: [], perMod: {}, filesChecked: 0, modsChecked: 0, renamedCopies: [] };
   const folders = fs
     .readdirSync(modsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !fs.existsSync(path.join(modsDir, d.name, 'disable.it')))
     .map((d) => d.name)
     .sort(sortFolders);
+
+  // Renamed mods: same Workshop id suffix on 2+ folders (enabled or not).
+  const allFolders = fs.readdirSync(modsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  const byId = new Map<string, string[]>();
+  for (const f of allFolders) {
+    const id = /_(\d{6,})$/.exec(f)?.[1];
+    if (id) byId.set(id, [...(byId.get(id) ?? []), f]);
+  }
+  const renamedCopies: IsaacConflicts['renamedCopies'] = [...byId.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([workshopId, list]) => ({
+      workshopId,
+      folders: list
+        .map((folder) => {
+          const st = fs.statSync(path.join(modsDir, folder));
+          return { folder, enabled: !fs.existsSync(path.join(modsDir, folder, 'disable.it')), changedAt: st.mtime.toISOString() };
+        })
+        .sort((a, b) => b.changedAt.localeCompare(a.changedAt)),
+    }));
 
   // Re-use the last result while no enabled folder (or its resources) changed.
   const key = folders
@@ -56,7 +75,7 @@ export function analyzeIsaacConflicts(mods: ModRecord[]): IsaacConflicts {
       return `${f}:${stamp.join(',')}`;
     })
     .join('|');
-  if (cache?.key === key) return cache.result;
+  if (cache?.key === key) return { ...cache.result, renamedCopies };
 
   const owners = new Map<string, number[]>(); // file -> indexes of folders that ship it, in load order
   let filesChecked = 0;
@@ -118,7 +137,7 @@ export function analyzeIsaacConflicts(mods: ModRecord[]): IsaacConflicts {
     bump(p.loser.modId, 'losses', p.fileCount, p.winner.title);
   }
 
-  const result: IsaacConflicts = { pairs, perMod, filesChecked, modsChecked: folders.length };
+  const result: IsaacConflicts = { pairs, perMod, filesChecked, modsChecked: folders.length, renamedCopies };
   cache = { key, result };
   return result;
 }

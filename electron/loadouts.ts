@@ -4,6 +4,8 @@ import path from 'node:path';
 import type { Loadout, LoadoutsForGame, ModRecord } from '../shared/types';
 import { isaacModsDir, pzDefaultModsFile, rimworldModsConfigFile } from './loadOrder';
 import { GAME_EXE, backup, backupRoot, isRunning } from './loadOrderWrite';
+import { findMo2Instances, readMo2Modlist } from './mo2';
+import { planRimworldOrder } from './rimworldSort';
 
 /**
  * Loadouts = named mod lists per game, kept where the game itself keeps them when it has its own format
@@ -227,7 +229,40 @@ const GAMES: Record<
   },
 };
 
+/** MO2 profiles for a game: shown as loadouts; "apply" means "use this profile for Play" (MO2 owns the files). */
+function mo2Loadouts(gameId: string): LoadoutsForGame | null {
+  const inst = findMo2Instances().find((i) => i.gameId === gameId);
+  if (!inst) return null;
+  const selected = inst.selectedProfile ?? inst.profiles[0];
+  const enabledOf = (p: string) => readMo2Modlist(inst, p).filter((e) => e.enabled).map((e) => e.name).reverse();
+  const current = selected ? enabledOf(selected) : [];
+  const cur = new Set(current.map((x) => x.toLowerCase()));
+  const loadouts: Loadout[] = inst.profiles.map((p) => {
+    const ids = enabledOf(p);
+    const want = new Set(ids.map((x) => x.toLowerCase()));
+    return {
+      id: `mo2:${p}`,
+      gameId,
+      name: p,
+      kind: 'game-list',
+      kindLabel: p === selected ? 'MO2 profile (selected in MO2)' : 'MO2 profile',
+      path: path.join(inst.root, 'profiles', p),
+      ids,
+      modifiedAt: mtimeIso(path.join(inst.root, 'profiles', p, 'modlist.txt')),
+      count: ids.length,
+      missing: [],
+      toEnable: [...want].filter((x) => !cur.has(x)).length,
+      toDisable: [...cur].filter((x) => !want.has(x)).length,
+      isCurrent: p === selected,
+      canDelete: false,
+    };
+  });
+  return { gameId, supported: true, current, loadouts, managedBy: 'mo2' };
+}
+
 export function getLoadouts(gameId: string, mods: ModRecord[]): LoadoutsForGame {
+  const viaMo2 = mo2Loadouts(gameId);
+  if (viaMo2) return viaMo2;
   const g = GAMES[gameId];
   if (!g) return { gameId, supported: false, current: [], loadouts: [] };
   const current = g.current();
@@ -260,13 +295,17 @@ export function applyLoadout(gameId: string, loadoutId: string, mods: ModRecord[
   const l = getLoadouts(gameId, mods).loadouts.find((x) => x.id === loadoutId);
   if (!l) return { ok: false, message: 'Loadout not found.' };
   try {
+    let sortedNote = '';
     if (gameId === 'rimworld') {
       const f = rimworldModsConfigFile();
       const text = fs.readFileSync(f, 'utf8');
       backup(gameId, f);
+      // Lists saved elsewhere (or edited by hand) may break load rules: write them in the closest valid order.
+      const plan = planRimworldOrder(l.ids, mods);
+      if (plan.moved) sortedNote = ` Auto-sorted ${plan.moved} position(s) to satisfy load rules.`;
       fs.writeFileSync(
         f,
-        text.replace(/<activeMods>[\s\S]*?<\/activeMods>/i, `<activeMods>\n${l.ids.map((id) => `    <li>${id.toLowerCase()}</li>`).join('\n')}\n  </activeMods>`),
+        text.replace(/<activeMods>[\s\S]*?<\/activeMods>/i, `<activeMods>\n${plan.proposed.map((id) => `    <li>${id.toLowerCase()}</li>`).join('\n')}\n  </activeMods>`),
         'utf8',
       );
     } else if (gameId === 'project-zomboid') {
@@ -297,7 +336,7 @@ export function applyLoadout(gameId: string, loadoutId: string, mods: ModRecord[
     }
     const note = l.missing.length ? ` ${l.missing.length} mod(s) in it aren't installed and were skipped by the game.` : '';
     console.log(`[Mod Hub] Applied loadout "${l.name}" to ${gameId}`);
-    return { ok: true, message: `Applied “${l.name}” (+${l.toEnable} / −${l.toDisable}).${note}` };
+    return { ok: true, message: `Applied “${l.name}” (+${l.toEnable} / −${l.toDisable}).${note}${sortedNote}` };
   } catch (e) {
     return { ok: false, message: `Couldn't apply: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -312,12 +351,12 @@ function saveSnapshot(gameId: string, name: string, ids: string[]): string {
 }
 
 /** Save the game's current enabled list as a named loadout, in the game's own format where it has one. */
-export function saveCurrentLoadout(gameId: string, name: string, mods: ModRecord[], targetFile?: string): Result {
+export function saveCurrentLoadout(gameId: string, name: string, mods: ModRecord[], targetFile?: string, idsOverride?: string[]): Result {
   const g = GAMES[gameId];
   if (!g) return { ok: false, message: 'Loadouts are not supported for this game yet.' };
   const clean = name.trim();
   if (!clean) return { ok: false, message: 'Give the loadout a name.' };
-  const ids = g.current();
+  const ids = idsOverride ?? g.current();
   try {
     if (gameId === 'rimworld') {
       const dir = rimworldModListsDir();
@@ -409,4 +448,59 @@ export function updateLoadout(gameId: string, loadoutId: string, mods: ModRecord
   }
   if (l.kind === 'modhub' && l.path) backup(gameId, l.path);
   return saveCurrentLoadout(gameId, l.name, mods);
+}
+
+// ---------- PZ: write a list into one save ----------
+
+/** Project Zomboid: make a save load exactly this list (its Saves/<mode>/<save>/mods.txt, backed up first). */
+export function applyLoadoutToPzSave(loadoutId: string, saveId: string, mods: ModRecord[]): Result {
+  const blocked = guard('project-zomboid');
+  if (blocked) return blocked;
+  const all = getLoadouts('project-zomboid', mods).loadouts;
+  const l = all.find((x) => x.id === loadoutId);
+  const save = all.find((x) => x.id === saveId && x.kind === 'save');
+  if (!l || !save?.path) return { ok: false, message: 'List or save not found.' };
+  try {
+    const text = fs.readFileSync(save.path, 'utf8');
+    backup('project-zomboid', save.path);
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    const body = l.ids.map((id) => `\tmod = ${id},`).join(eol);
+    fs.writeFileSync(
+      save.path,
+      /mods\s*\{[\s\S]*?\}/.test(text) ? text.replace(/mods\s*\{[\s\S]*?\}/, `mods${eol}{${eol}${body}${eol}}`) : `VERSION = 1,${eol}${eol}mods${eol}{${eol}${body}${eol}}${eol}`,
+      'utf8',
+    );
+    return { ok: true, message: `Save “${save.name}” now loads “${l.name}” (${l.ids.length} mods).` };
+  } catch (e) {
+    return { ok: false, message: `Couldn't write the save's mod list: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+// ---------- share codes ----------
+
+const CODE_PREFIX = 'MODHUB1:';
+
+/** A copyable code for a list: game + name + ordered ids. */
+export function exportLoadoutCode(gameId: string, loadoutId: string, mods: ModRecord[]): { ok: boolean; message: string; code?: string } {
+  const l = getLoadouts(gameId, mods).loadouts.find((x) => x.id === loadoutId);
+  if (!l) return { ok: false, message: 'Loadout not found.' };
+  const code = CODE_PREFIX + Buffer.from(JSON.stringify({ g: gameId, n: l.name, i: l.ids }), 'utf8').toString('base64');
+  return { ok: true, message: `Copied “${l.name}” (${l.ids.length} mods) as a share code.`, code };
+}
+
+/** Save a pasted share code as a new list for its game (in the game's own format). */
+export function importLoadoutCode(code: string, mods: ModRecord[]): Result & { gameId?: string } {
+  const raw = code.trim();
+  if (!raw.startsWith(CODE_PREFIX)) return { ok: false, message: 'That doesn\u2019t look like a Mod Hub share code.' };
+  let data: { g?: string; n?: string; i?: unknown };
+  try {
+    data = JSON.parse(Buffer.from(raw.slice(CODE_PREFIX.length), 'base64').toString('utf8'));
+  } catch {
+    return { ok: false, message: 'The share code is damaged.' };
+  }
+  const ids = Array.isArray(data.i) ? data.i.filter((x): x is string => typeof x === 'string' && x.length < 200) : [];
+  if (!data.g || !GAMES[data.g] || !ids.length) return { ok: false, message: 'The share code is for an unsupported game or is empty.' };
+  const name = `${String(data.n ?? 'Imported').slice(0, 60)} (imported)`;
+  const r = saveCurrentLoadout(data.g, name, mods, undefined, ids);
+  return { ...r, gameId: data.g };
 }

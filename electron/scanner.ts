@@ -15,6 +15,7 @@ import { applyDuplicateHints } from './dedupeMods';
 import { enrichModsWithNexusApi, hydrateNexusFieldsFromPrevious } from './nexusModDetails';
 import { applyWorkshopArchive, rememberWorkshopDetails } from './workshopArchive';
 import { scanThunderstoreProfiles } from './thunderstore';
+import { scanMo2Mods } from './mo2';
 import { scanVortexMetadb } from './vortexMetadbScanner';
 import { syncArchiveVault } from './archiveVault';
 import { readWorkshopAcf } from './workshopAcf';
@@ -182,6 +183,12 @@ export async function scanAllMods(
     scanTreeForMods(extra, addMod, 'unknown', slugify(path.basename(extra)), 'extra');
   }
 
+  tick('extra', 'Mod Organizer 2 instances...');
+  try {
+    scanMo2Mods(addMod);
+  } catch (e) {
+    console.warn('[Mod Hub] MO2 scan failed:', e);
+  }
   tick('extra', 'Thunderstore profiles (r2modman)...');
   try {
     scanThunderstoreProfiles(addMod);

@@ -796,17 +796,69 @@ button {
   background: var(--bg-card);
   overflow: hidden;
   color: inherit;
+  cursor: pointer;
 }
 
-.game-card:disabled {
+.game-card:focus-visible {
+  outline: 2px solid #5fa8ff;
+  outline-offset: 2px;
+}
+
+.game-card.is-disabled {
   opacity: 0.45;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .game-card-art {
+  position: relative;
   aspect-ratio: 2 / 3;
   background: #12161f;
   overflow: hidden;
+}
+
+/* Play overlay: hidden until the card is hovered or something inside it has focus (open dropdowns). */
+.game-card-play-overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  justify-content: center;
+  padding: 2.2rem 0.4rem 0.55rem;
+  background: linear-gradient(to top, rgba(8, 10, 16, 0.92), rgba(8, 10, 16, 0.55) 60%, transparent);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.game-card:hover .game-card-play-overlay,
+.game-card:focus-within .game-card-play-overlay {
+  opacity: 1;
+  transform: none;
+}
+
+.game-card-play-overlay .play-group {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.game-update-badge {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  right: 0.4rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(240, 180, 90, 0.92);
+  color: #1a1206;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-card-play-overlay {
+    transition: none;
+    transform: none;
+  }
 }
 
 .game-card-art img {
@@ -1956,4 +2008,43 @@ button.reupload-pill {
 .nexus-endorse {
   color: #e8846a;
   font-size: 0.8rem;
+}
+
+/* Play */
+.play-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.play-btn {
+  font-weight: 600;
+}
+
+.play-select {
+  max-width: 220px;
+  padding: 0.25rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.play-group.compact .play-select {
+  max-width: 150px;
+}
+
+
+.renamed-folder {
+  margin-right: 0.8rem;
+  color: var(--text-muted);
+}
+
+.renamed-copy {
+  margin-bottom: 0.4rem;
+}
+
+.loadouts-import {
+  margin: 0 0 0.8rem;
 }

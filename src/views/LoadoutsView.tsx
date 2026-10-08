@@ -13,6 +13,11 @@ const GAMES: { id: string; name: string; note: string }[] = [
   { id: 'rimworld', name: 'RimWorld', note: "Lists live in RimWorld's ModLists folder, the same ones its own Mod Lists menu uses." },
   { id: 'project-zomboid', name: 'Project Zomboid', note: "Saved lists come from PZ's mod manager; each save also keeps its own list." },
   { id: 'binding-of-isaac', name: 'The Binding of Isaac', note: "Isaac has no list format of its own, so Mod Hub stores these. REPENTOGON's mod always stays on." },
+  {
+    id: 'skyrimse',
+    name: 'Skyrim SE (MO2)',
+    note: 'Mod Organizer 2 profiles. MO2 owns them, so Mod Hub doesn’t rewrite them: pick one for ▶ Play, edit them in MO2.',
+  },
 ];
 
 /** id (lower-case) → display title, per game, so lists show mod names instead of package ids/folders. */
@@ -43,6 +48,7 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [newName, setNewName] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [importCode, setImportCode] = useState('');
 
   const refresh = useCallback(async () => {
     if (!window.modHub?.getLoadouts) return;
@@ -78,6 +84,10 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   }
 
   function apply(l: Loadout) {
+    if (data?.managedBy === 'mo2') {
+      void run(() => window.modHub.applyLoadout(gameId, l.id));
+      return;
+    }
     const missing = l.missing.length ? `\n${l.missing.length} mod(s) in it aren't installed and will be skipped.` : '';
     if (
       !window.confirm(
@@ -107,6 +117,35 @@ The old version is backed up first.`,
     void run(() => window.modHub.updateLoadout(gameId, l.id));
   }
 
+  async function share(l: Loadout) {
+    const r = await window.modHub.exportLoadoutCode(gameId, l.id);
+    if (r.ok && r.code) {
+      try {
+        await navigator.clipboard.writeText(r.code);
+        toast(r.message, 'ok');
+      } catch {
+        window.prompt('Copy this share code:', r.code);
+      }
+    } else toast(r.message, 'error');
+  }
+
+  async function doImport() {
+    const r = await window.modHub.importLoadoutCode(importCode);
+    toast(r.message, r.ok ? 'ok' : 'error');
+    if (r.ok) {
+      setImportCode('');
+      if (r.gameId && r.gameId !== gameId) setGameId(r.gameId);
+      else await refresh();
+    }
+  }
+
+  function applyToSave(l: Loadout, saveId: string) {
+    const save = data?.loadouts.find((x) => x.id === saveId);
+    if (!save) return;
+    if (!window.confirm(`Make the save “${save.name}” load “${l.name}” (${l.ids.length} mods)?\n\nThat save's current mod list is backed up first. PZ must be closed.`)) return;
+    void run(() => window.modHub.applyLoadoutToSave(l.id, saveId));
+  }
+
   function saveCurrent() {
     const name = newName.trim();
     if (!name) return;
@@ -132,25 +171,44 @@ The old version is backed up first.`,
             </button>
           ))}
         </div>
-        <form
-          className="loadouts-save"
-          onSubmit={(e) => {
-            e.preventDefault();
-            saveCurrent();
-          }}
-        >
-          <input
-            type="text"
-            placeholder={`Name for the current ${game.name} setup…`}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <button type="submit" className="btn btn-primary" disabled={busy || !newName.trim()}>
-            Save as new ({data?.current.length ?? 0} enabled)
-          </button>
-        </form>
+        {data?.managedBy !== 'mo2' && (
+          <form
+            className="loadouts-save"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveCurrent();
+            }}
+          >
+            <input
+              type="text"
+              placeholder={`Name for the current ${game.name} setup…`}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary" disabled={busy || !newName.trim()}>
+              Save as new ({data?.current.length ?? 0} enabled)
+            </button>
+          </form>
+        )}
       </div>
       <p className="loadouts-note">{game.note}</p>
+      <form
+        className="loadouts-save loadouts-import"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void doImport();
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Paste a Mod Hub share code (MODHUB1:…) to import a list"
+          value={importCode}
+          onChange={(e) => setImportCode(e.target.value)}
+        />
+        <button type="submit" className="btn" disabled={!importCode.trim()}>
+          Import
+        </button>
+      </form>
 
       {!data ? (
         <div className="empty-state">Reading {game.name} lists…</div>
@@ -191,13 +249,13 @@ The old version is backed up first.`,
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  disabled={busy || l.isCurrent}
+                  disabled={busy || (l.isCurrent && data.managedBy !== 'mo2')}
                   title={l.kind === 'save' ? "Make this save's mod list the main (new game) list" : 'Make this the enabled mod list'}
                   onClick={() => apply(l)}
                 >
-                  {l.kind === 'save' ? 'Use as main list' : 'Apply'}
+                  {data.managedBy === 'mo2' ? 'Use for ▶ Play' : l.kind === 'save' ? 'Use as main list' : 'Apply'}
                 </button>
-                {l.kind !== 'save' && (
+                {l.kind !== 'save' && data.managedBy !== 'mo2' && (
                   <button
                     type="button"
                     className="btn btn-sm"
@@ -207,6 +265,28 @@ The old version is backed up first.`,
                   >
                     Update
                   </button>
+                )}
+                {data.managedBy !== 'mo2' && (
+                  <button type="button" className="btn btn-sm" title="Copy a share code for this list" onClick={() => void share(l)}>
+                    Share
+                  </button>
+                )}
+                {gameId === 'project-zomboid' && l.kind !== 'save' && data.loadouts.some((x) => x.kind === 'save') && (
+                  <select
+                    className="play-select"
+                    value=""
+                    title="Write this list into one save's mods.txt"
+                    onChange={(e) => e.target.value && applyToSave(l, e.target.value)}
+                  >
+                    <option value="">Apply to save…</option>
+                    {data.loadouts
+                      .filter((x) => x.kind === 'save')
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                  </select>
                 )}
                 {l.canDelete && (
                   <button type="button" className="btn btn-sm" disabled={busy} onClick={() => remove(l)}>

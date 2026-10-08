@@ -79,6 +79,8 @@ export interface ModRecord {
   /** Nexus popularity (v2 GraphQL), refreshed with the update check. */
   nexusEndorsements?: number;
   nexusDownloads?: number;
+  /** Installed in a Mod Organizer 2 instance (MO2 owns its profiles; Mod Hub reads them). */
+  mo2?: { instance: string; name: string; newestVersion?: string };
   /** Installed through r2modman / Thunderstore Mod Manager (read-only; the manager owns the profile). */
   thunderstore?: { packageName: string; profile: string; websiteUrl?: string; enabled: boolean };
   /** Steam Workshop votes (via the Steam client), refreshed at most daily. */
@@ -197,6 +199,13 @@ export interface HubSettings {
   lastNexusUpdateCheck?: string;
   /** Duplicates tab: groups (sorted mod ids joined by +) the user marked as not duplicates. */
   ignoredDuplicateGroups?: string[];
+  /** Background checks (defaults: on, Nexus every 6 h). Steam-client checks briefly show you "in game". */
+  workshopRatingsEnabled?: boolean;
+  reuploadSearchEnabled?: boolean;
+  nexusUpdateChecksEnabled?: boolean;
+  nexusUpdateIntervalHours?: number;
+  /** Play: last launch method (and MO2 profile) per game. */
+  playChoices?: Record<string, { optionId: string; profile?: string }>;
   /** Default game filter for All mods / Steam (all | game id). */
   defaultGameFilter?: string;
   lastGameFilter?: string;
@@ -206,6 +215,33 @@ export interface HubSettings {
   dismissedMods?: string[];
   /** Game ids hidden from all mod lists (undefined = defaults). */
   hiddenGames?: string[];
+}
+
+/** One way to start a game (best first). */
+export interface PlayOption {
+  id: string;
+  label: string;
+  kind: 'steam' | 'exe' | 'mo2';
+  command: string;
+  args: string[];
+  recommended?: boolean;
+  note?: string;
+  /** MO2: available profiles and the one MO2 has selected. */
+  profiles?: string[];
+  profile?: string;
+}
+
+export interface PlayInfo {
+  gameId: string;
+  options: PlayOption[];
+  /** Remembered choice for this game. */
+  chosenId?: string;
+  chosenProfile?: string;
+  running: boolean;
+  /** Things worth knowing before launching (order problems, conflicts, two mod managers…). */
+  warnings: string[];
+  /** Steam has an update waiting for this game (a Steam launch installs it first). */
+  steamUpdatePending?: { bytes?: number; autoUpdate?: string };
 }
 
 export interface IsaacConflictSide {
@@ -224,6 +260,8 @@ export interface IsaacConflictPair {
 
 export interface IsaacConflicts {
   pairs: IsaacConflictPair[];
+  /** One Workshop item in 2+ folders (author renamed the mod; Isaac kept the old copy). Newest first. */
+  renamedCopies: { workshopId: string; folders: { folder: string; enabled: boolean; changedAt: string }[] }[];
   /** By catalog mod id: files it wins / loses, and against which mods. */
   perMod: Record<string, { wins: number; losses: number; winsOver: string[]; lostTo: string[] }>;
   filesChecked: number;
@@ -321,6 +359,8 @@ export interface LoadoutsForGame {
   /** The game's enabled list right now, in order. */
   current: string[];
   loadouts: Loadout[];
+  /** Lists owned by another tool (MO2): Mod Hub picks one for Play instead of rewriting it. */
+  managedBy?: 'mo2';
 }
 
 export interface ScanOptions {
@@ -406,6 +446,16 @@ export type IpcApi = {
   getLoadOrders: () => Promise<Record<string, GameLoadOrder>>;
   /** Enabled Isaac mods that replace the same resource files (winner = earlier in folder-name order). */
   getIsaacConflicts: () => Promise<IsaacConflicts>;
+  /** Launch options + pre-launch checks for a game. */
+  getPlayInfo: (gameId: string) => Promise<PlayInfo>;
+  /** Installed Steam games with an update waiting (appId -> download size). */
+  getSteamUpdates: (appIds: number[]) => Promise<Record<number, { bytes?: number }>>;
+  /** Isaac: add/remove disable.it for one mods folder (game must be closed). */
+  setIsaacFolderEnabled: (folder: string, enabled: boolean) => Promise<{ ok: boolean; message: string }>;
+  /** Open a Workshop search for `text` in the Steam client. */
+  openWorkshopSearch: (appId: number, text: string) => Promise<void>;
+  /** Start the game through the chosen option (remembered for next time). */
+  playGame: (gameId: string, optionId: string, profile?: string) => Promise<{ ok: boolean; message: string }>;
   /** Turn mods on/off in the game's own list (refuses while the game runs; backs up config files first). */
   setModsEnabled: (gameId: string, modIds: string[], enabled: boolean) => Promise<{ ok: boolean; message: string; changed: number }>;
   getLoadouts: (gameId: string) => Promise<LoadoutsForGame>;
@@ -418,6 +468,10 @@ export type IpcApi = {
   deleteLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
   /** Overwrite a saved list with the current enabled mods. */
   updateLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
+  /** PZ: make one save load a list. */
+  applyLoadoutToSave: (loadoutId: string, saveId: string) => Promise<{ ok: boolean; message: string }>;
+  exportLoadoutCode: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string; code?: string }>;
+  importLoadoutCode: (code: string) => Promise<{ ok: boolean; message: string; gameId?: string }>;
   /** Cover art from the Steam client's local library cache (works for new games with hashed store URLs). */
   getSteamGameArt: (appId: number) => Promise<string | null>;
   fetchRemoteThumbnail: (url: string) => Promise<string | null>;

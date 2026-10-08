@@ -10,7 +10,10 @@
     "start": "electron .",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "classic-level": "^3.0.0",
@@ -26,11 +29,45 @@
     "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
     "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vite-plugin-electron": "^1.1.2",
     "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^5.0.3",
     "wait-on": "^9.5.1"
+  },
+  "description": "Desktop mod library for Steam Workshop, Vortex/Nexus, MO2 and local mods",
+  "author": "Strikeborn",
+  "build": {
+    "appId": "io.github.strikeborn.modhub",
+    "productName": "Mod Hub",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "electron/steam-workshop-helper.cjs",
+      "package.json",
+      "build/icon.png"
+    ],
+    "asarUnpack": [
+      "electron/steam-workshop-helper.cjs",
+      "node_modules/steamworks.js/**",
+      "node_modules/classic-level/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Mod-Hub-Setup-${version}.${ext}"
+    }
   }
 }

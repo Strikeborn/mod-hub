@@ -3,6 +3,7 @@ import type { CatalogSnapshot, SteamLibraryGame } from '@shared/types';
 import { useHubNavigation } from '../context/HubNavigation';
 import { modCountForGame, steamAppIdForGameId } from '../utils/games';
 import { GameCoverImage } from '../components/GameCoverImage';
+import { PlayButton } from '../components/PlayButton';
 import { formatDate } from '../utils/format';
 
 type Props = {
@@ -18,10 +19,24 @@ export function GamesView({ catalog }: Props) {
   const { openGameInstalled } = useHubNavigation();
   const [steamGames, setSteamGames] = useState<SteamLibraryGame[]>([]);
   const [filter, setFilter] = useState<GameFilter>('all');
+  // Play options load when a card is first hovered; keep them loaded afterwards.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [played, setPlayed] = useState<Set<string>>(new Set());
+  const [updates, setUpdates] = useState<Record<number, { bytes?: number }>>({});
 
   useEffect(() => {
     window.modHub?.getSteamLibraryGames().then(setSteamGames);
   }, [catalog.scannedAt]);
+
+  useEffect(() => {
+    if (hovered) setPlayed((s) => (s.has(hovered) ? s : new Set(s).add(hovered)));
+  }, [hovered]);
+
+  // "Steam update waiting" badges: one cheap read of Steam's app manifests for all installed games.
+  useEffect(() => {
+    const ids = steamGames.filter((s) => s.ownedOnDisk).map((s) => s.appId);
+    if (ids.length) void window.modHub?.getSteamUpdates(ids).then(setUpdates);
+  }, [steamGames]);
 
   const cards = useMemo(() => {
     const registry = catalog.games.map((g) => {
@@ -69,15 +84,34 @@ export function GamesView({ catalog }: Props) {
       </div>
       <div className="game-grid">
         {cards.map((g) => (
-          <button
+          <div
             key={g.id}
-            type="button"
-            className="game-card"
-            onClick={() => openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id)}
-            disabled={g.localMods === 0 && !g.ownedOnDisk}
+            className={`game-card${g.localMods === 0 && !g.ownedOnDisk ? ' is-disabled' : ''}`}
+            role="button"
+            tabIndex={0}
+            title={g.localMods ? `Show ${g.name}'s mods` : g.name}
+            onMouseEnter={() => setHovered(g.id)}
+            onFocus={() => setHovered(g.id)}
+            onClick={() => g.localMods > 0 && openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && g.localMods > 0) openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id);
+            }}
           >
             <div className="game-card-art">
               {g.appId ? <GameCoverImage appId={g.appId} name={g.name} /> : <span>{g.name.slice(0, 1)}</span>}
+              {g.appId && updates[g.appId] && (
+                <span
+                  className="game-update-badge"
+                  title="Steam has an update waiting for this game. Launching through Steam installs it first."
+                >
+                  Steam update waiting{updates[g.appId].bytes ? ` · ${(updates[g.appId].bytes! / 1e9).toFixed(1)} GB` : ''}
+                </span>
+              )}
+              {g.ownedOnDisk && (
+                <div className="game-card-play-overlay" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  <PlayButton gameId={g.id} compact active={hovered === g.id || played.has(g.id)} />
+                </div>
+              )}
             </div>
             <div className="game-card-body">
               <h3>{g.name}</h3>
@@ -86,7 +120,7 @@ export function GamesView({ catalog }: Props) {
                 {g.ownedOnDisk ? ' · Installed' : ''}
               </span>
             </div>
-          </button>
+          </div>
         ))}
       </div>
       <p className="message" style={{ marginTop: '1rem' }}>

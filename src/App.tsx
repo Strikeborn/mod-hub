@@ -22,6 +22,7 @@ import { NexusView } from './views/NexusView';
 import { GamesView } from './views/GamesView';
 import { LoadoutsView } from './views/LoadoutsView';
 import { DuplicatesView } from './views/DuplicatesView';
+import { PlayButton } from './components/PlayButton';
 import { SettingsView } from './views/SettingsView';
 
 const emptyCatalog: CatalogSnapshot = { scannedAt: '', games: [], mods: [] };
@@ -51,6 +52,9 @@ const ISSUE_LABELS: Record<OrderPlan['issues'][number]['kind'], string> = {
   'duplicate-id': 'Duplicate',
   cycle: 'Conflict',
 };
+
+/** A newer version exists on the Workshop (subscribed/kept) or on Nexus. */
+const hasUpdate = (m: ModRecord) => Boolean(m.revision.updateAvailable || m.nexusUpdateAvailable);
 
 /** RimWorld package ids compare case-insensitively; a Workshop duplicate may carry a _steam suffix. */
 const rwNorm = (id: string) => id.toLowerCase().replace(/_steam$/, '');
@@ -87,6 +91,7 @@ function AppInner() {
   // Typing updates the box immediately; filtering 1,600+ cards follows at lower priority.
   const deferredQuery = useDeferredValue(query);
   const [inGameFilter, setInGameFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [updatesOnly, setUpdatesOnly] = useState(false);
   const [sortMode, setSortMode] = useState<'title' | 'load-order'>('title');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'nexus-vortex' | 'steam-workshop' | 'local' | 'other'>(
     'all',
@@ -312,6 +317,7 @@ function AppInner() {
       list = list.filter(
         (m) => !isNexusLikeSource(m) && m.source !== 'steam-workshop' && m.source !== 'local',
       );
+    if (updatesOnly) list = list.filter(hasUpdate);
     if (inGameFilter !== 'all') {
       const want = inGameFilter === 'enabled';
       list = list.filter((m) => loadStates.get(m.id)?.enabled === want);
@@ -335,7 +341,13 @@ function AppInner() {
       list = [...list].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
     }
     return list;
-  }, [visibleCatalog.mods, deferredQuery, gameFilter, sourceFilter, inGameFilter, sortMode, loadStates, loadOrders]);
+  }, [visibleCatalog.mods, deferredQuery, gameFilter, sourceFilter, inGameFilter, updatesOnly, sortMode, loadStates, loadOrders]);
+
+  /** Mods with a newer version on the Workshop or Nexus, for the current game filter. */
+  const updateCount = useMemo(
+    () => visibleCatalog.mods.filter((m) => (gameFilter === 'all' || m.gameId === gameFilter) && hasUpdate(m)).length,
+    [visibleCatalog.mods, gameFilter],
+  );
 
   /** Load-order support for the single game currently filtered (null for "All games" / unsupported games). */
   const activeLoadOrder = gameFilter !== 'all' ? (loadOrders[gameFilter] ?? null) : null;
@@ -343,23 +355,26 @@ function AppInner() {
   const shownToggleable = useMemo(() => filtered.filter((m) => loadStates.has(m.id)), [filtered, loadStates]);
 
   const orderGame = gameFilter === 'rimworld' && loadOrders.rimworld ? 'rimworld' : null;
+  /** Games with an issues check (RimWorld order + deps, PZ deps). */
+  const issueGame =
+    orderGame ?? (gameFilter === 'project-zomboid' && loadOrders['project-zomboid'] ? 'project-zomboid' : null);
   useEffect(() => {
     setPendingOrder(null);
     setShowOrderIssues(false);
   }, [gameFilter]);
   useEffect(() => {
-    if (!orderGame || !window.modHub?.planLoadOrder) {
+    if (!issueGame || !window.modHub?.planLoadOrder) {
       setOrderPlan(null);
       return;
     }
     let cancelled = false;
-    void window.modHub.planLoadOrder(orderGame, pendingOrder?.ids).then((p) => {
+    void window.modHub.planLoadOrder(issueGame, issueGame === 'rimworld' ? pendingOrder?.ids : undefined).then((p) => {
       if (!cancelled) setOrderPlan(p);
     });
     return () => {
       cancelled = true;
     };
-  }, [orderGame, pendingOrder, loadOrders]);
+  }, [issueGame, pendingOrder, loadOrders]);
 
   // Isaac: mods replacing the same resource files (re-read whenever the enabled state changes).
   const [isaacConflicts, setIsaacConflicts] = useState<IsaacConflicts | null>(null);
@@ -653,6 +668,14 @@ function AppInner() {
                       <option value="other">Other</option>
                     </select>
                   </label>
+                  <button
+                    type="button"
+                    className={`btn btn-sm${updatesOnly ? ' btn-active' : ''}`}
+                    title="Show only mods with a newer version on the Workshop or Nexus"
+                    onClick={() => setUpdatesOnly((v) => !v)}
+                  >
+                    ⬆ Updates ({updateCount})
+                  </button>
                   <label
                     className="toolbar-select"
                     title="Enabled in the game's own mod list (RimWorld, Project Zomboid, Isaac). Other games: not filtered."
@@ -698,15 +721,26 @@ function AppInner() {
                   {isaacConflicts && (
                     <button
                       type="button"
-                      className={`btn btn-sm order-check${isaacConflicts.pairs.length ? ' has-issues' : ''}`}
+                      className={`btn btn-sm order-check${isaacConflicts.pairs.length || isaacConflicts.renamedCopies.length ? ' has-issues' : ''}`}
                       title={`Enabled mods that ship the same resource files (${isaacConflicts.filesChecked.toLocaleString()} files in ${isaacConflicts.modsChecked} enabled mods checked)`}
                       onClick={() => setShowConflicts((v) => !v)}
                     >
                       {isaacConflicts.pairs.length ? `⚠ ${isaacConflicts.pairs.length} file conflicts` : '✓ No file conflicts'}
+                      {isaacConflicts.renamedCopies.length ? ` · ${isaacConflicts.renamedCopies.length} renamed-mod copies` : ''}
                     </button>
                   )}
-                  {orderGame && (
+                  {gameFilter !== 'all' && (
+                    <PlayButton
+                      gameId={gameFilter}
+                      beforePlay={() =>
+                        !pendingOrder ||
+                        window.confirm('You have an unsaved load order. Play with the order that is saved now (the unsaved changes stay pending)?')
+                      }
+                    />
+                  )}
+                  {issueGame && (
                     <>
+                      {orderGame && (
                       <button
                         type="button"
                         className="btn btn-sm"
@@ -716,6 +750,7 @@ function AppInner() {
                       >
                         Auto-sort
                       </button>
+                      )}
                       {orderPlan && (
                         <button
                           type="button"
@@ -804,6 +839,29 @@ function AppInner() {
                 When two enabled mods ship the same file, Isaac uses the one that loads first (folder-name order, which is
                 why texture packs start with “!”). Lua scripts and content XML are merged, so only resources/ files count.
               </p>
+              {isaacConflicts.renamedCopies.map((r) => (
+                <div key={r.workshopId} className="conflict-row renamed-copy">
+                  <strong>Renamed mod, {r.folders.length} folders:</strong>{' '}
+                  {r.folders.map((f, i) => (
+                    <span key={f.folder} className="renamed-folder">
+                      {f.folder} ({i === 0 ? 'newest' : 'older'}, {f.enabled ? 'enabled' : 'disabled'})
+                      {i > 0 && f.enabled && (
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={async () => {
+                            const res = await window.modHub?.setIsaacFolderEnabled(f.folder, false);
+                            if (res) toast(res.message, res.ok ? 'ok' : 'error');
+                            await refreshLoadOrders();
+                          }}
+                        >
+                          Disable old copy
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ))}
               {isaacConflicts.pairs.length === 0 && <div>No enabled mods replace the same files.</div>}
               {isaacConflicts.pairs.map((p, n) => (
                 <div key={`${p.winner.folder}>${p.loser.folder}`} className="conflict-row">
@@ -823,13 +881,38 @@ function AppInner() {
               ))}
             </div>
           )}
-          {tab === 'library' && orderGame && showOrderIssues && orderPlan && (
+          {tab === 'library' && issueGame && showOrderIssues && orderPlan && (
             <ul className="order-issues">
               {orderPlan.issues.length === 0 && <li>No problems: every dependency and loadAfter/loadBefore rule is satisfied.</li>}
               {orderPlan.issues.map((i, n) => (
                 <li key={n} className={`issue-${i.kind}`}>
                   <span className="order-issue-kind">{ISSUE_LABELS[i.kind]}</span>
                   {i.message}
+                  {i.kind === 'dependency-off' && i.otherId && (() => {
+                    const dep = catalog.mods.find(
+                      (m) => m.gameId === issueGame && (m.modIds ?? []).some((x) => rwNorm(x) === rwNorm(i.otherId!)),
+                    );
+                    return dep ? (
+                      <button type="button" className="btn btn-xs" onClick={() => void onToggleEnabled(dep, true)}>
+                        Enable {dep.title}
+                      </button>
+                    ) : null;
+                  })()}
+                  {i.kind === 'dependency-missing' && i.otherId && (
+                    <button
+                      type="button"
+                      className="btn btn-xs"
+                      title="Search the Workshop in Steam"
+                      onClick={() =>
+                        void window.modHub?.openWorkshopSearch(
+                          issueGame === 'project-zomboid' ? 108600 : 294100,
+                          /needs (.+?), which isn't installed/.exec(i.message)?.[1] ?? i.otherId!,
+                        )
+                      }
+                    >
+                      Find on Workshop
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

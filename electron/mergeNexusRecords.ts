@@ -2,6 +2,8 @@ import type { ModRecord } from '../shared/types';
 
 function nexusKey(m: ModRecord): string | undefined {
   if (m.nexusModId == null) return undefined;
+  // MO2 installs are separate copies (their own folder + profiles); never fold them into Vortex rows.
+  if (m.mo2) return undefined;
   return `${(m.nexusGameDomain ?? m.gameId).toLowerCase()}|${m.nexusModId}`;
 }
 

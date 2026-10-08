@@ -12,6 +12,12 @@ export function SettingsView({ catalog, onSaved }: Props) {
   const [nexusKey, setNexusKey] = useState('');
   const [message, setMessage] = useState('');
 
+  async function saveBg(partial: Partial<HubSettings>) {
+    if (!window.modHub) return;
+    setSettings(await window.modHub.saveSettings(partial));
+    setMessage('Saved.');
+  }
+
   useEffect(() => {
     window.modHub?.getSettings().then((s) => {
       setSettings(s);
@@ -68,6 +74,48 @@ export function SettingsView({ catalog, onSaved }: Props) {
           >
             <option value="all">All games</option>
             <option value="last">Last chosen (remember per tab)</option>
+          </select>
+        </label>
+
+        <h2>Background checks</h2>
+        <p className="message message-compact settings-centered-note">
+          Workshop ratings and re-upload search go through the Steam client. Ratings run as Valve's test app
+          (Spacewar) for a few seconds, once a day. The re-upload search has to run as the mod's game, so Steam
+          briefly shows that game as played (weekly, only for mods removed from the Workshop).
+        </p>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.workshopRatingsEnabled !== false}
+            onChange={(e) => void saveBg({ workshopRatingsEnabled: e.target.checked })}
+          />
+          Workshop star ratings (daily, via Steam)
+        </label>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.reuploadSearchEnabled !== false}
+            onChange={(e) => void saveBg({ reuploadSearchEnabled: e.target.checked })}
+          />
+          Look for re-uploads of removed Workshop mods (via Steam)
+        </label>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.nexusUpdateChecksEnabled !== false}
+            onChange={(e) => void saveBg({ nexusUpdateChecksEnabled: e.target.checked })}
+          />
+          Check Nexus for updates, endorsements and downloads every
+          <select
+            value={settings.nexusUpdateIntervalHours ?? 6}
+            disabled={settings.nexusUpdateChecksEnabled === false}
+            onChange={(e) => void saveBg({ nexusUpdateIntervalHours: Number(e.target.value) })}
+          >
+            {[1, 3, 6, 12, 24].map((h) => (
+              <option key={h} value={h}>
+                {h} h
+              </option>
+            ))}
           </select>
         </label>
 

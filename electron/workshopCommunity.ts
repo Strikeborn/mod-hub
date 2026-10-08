@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import type { ModRecord, ReuploadCandidate } from '../shared/types';
 import { resolveSteamCreatorNames } from './steamCreators';
 import { loadWorkshopArchive } from './workshopArchive';
+import { titleMatch } from './titleMatch';
 
 /**
  * Workshop data that needs the Steam client (no Web API key): vote counts for star ratings, and a text search
@@ -62,8 +63,9 @@ export async function refreshWorkshopVotes(mods: ModRecord[], helperPath: string
   const rows = mods.filter((m) => m.workshopId && /^\d+$/.test(m.workshopId) && (m.steamAppId || m.keptFromWorkshop));
   const ids = [...new Set(rows.map((m) => m.workshopId!))];
   if (!ids.length) return 0;
-  const appId = rows[0].steamAppId ?? rows[0].keptFromWorkshop?.appId ?? 480;
-  const items = await runHelper(helperPath, ['details', String(appId), ...ids], 60_000 + ids.length * 1_000);
+  // Steam app 480 (Spacewar, Valve's free test app) can read any game's items. Starting the session as a real
+  // game would mark that game as "played" in Steam (last played / playtime), so never do that for ratings.
+  const items = await runHelper(helperPath, ['details', '480', ...ids], 60_000 + ids.length * 1_000);
   const byId = new Map(items.filter((i) => i.ok).map((i) => [i.id, i]));
   if (byId.size === 0) return 0; // Steam not running / helper failed: keep old numbers
   const now = new Date().toISOString();
@@ -78,30 +80,6 @@ export async function refreshWorkshopVotes(mods: ModRecord[], helperPath: string
     if (it.owner && !m.authorSteamId) m.authorSteamId = it.owner;
   }
   return n;
-}
-
-/** Lower-case, drop leading !/#/symbols and [tags]/(tags), collapse punctuation. */
-function normTitle(t: string): string {
-  return t
-    .toLowerCase()
-    .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
-    .replace(/[^a-z0-9']+/g, ' ')
-    .replace(/'/g, '')
-    .trim();
-}
-
-function titleMatch(original: string, candidate: string): 'exact' | 'close' | null {
-  const a = normTitle(original);
-  const b = normTitle(candidate);
-  if (!a || !b) return null;
-  if (a === b) return 'exact';
-  // A re-upload usually keeps the title and may add to it ("… REBORN", "[B42] …"). The reverse, a shorter
-  // candidate inside a longer original ("Undead Survivor" for "VFE Undead Survivor Patch"), is a different mod.
-  if (b.includes(a) && a.length / b.length >= 0.6) return 'close';
-  const wa = new Set(a.split(' '));
-  const wb = new Set(b.split(' '));
-  const inter = [...wa].filter((w) => wb.has(w)).length;
-  return inter / new Set([...wa, ...wb]).size >= 0.75 ? 'close' : null;
 }
 
 function cleanName(n: string | undefined): string | undefined {

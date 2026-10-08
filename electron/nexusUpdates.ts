@@ -25,19 +25,21 @@ async function fetchBatch(ids: { gameDomain: string; modId: number }[]): Promise
 }
 
 /** Version strings Vortex stores can carry a leading "v" or a file-name suffix; keep the comparable part. */
-function cleanVersion(v: string | undefined): string | undefined {
+export function cleanVersion(v: string | undefined): string | undefined {
   const t = v?.trim().replace(/^v(?=\d)/i, '');
   return t && /\d/.test(t) ? t : undefined;
 }
 
 /** Plain version numbers only ("2.1.0.10", "2.02a"); date/hotfix labels like "v32-20260621-hotfix1" can't be ordered. */
-function comparable(v: string | undefined): v is string {
+export function comparable(v: string | undefined): v is string {
   return Boolean(v && /^\d+(?:[.]\d+)*[a-z]?$/i.test(v));
 }
 
 /** Returns rows whose update state changed. */
 export async function checkNexusUpdates(mods: ModRecord[]): Promise<{ changed: number; checked: number; updates: number }> {
-  const rows = mods.filter((m) => m.nexusModId && m.nexusGameDomain && (m.source === 'nexus' || m.source === 'vortex-staging'));
+  const rows = mods.filter(
+    (m) => m.nexusModId && m.nexusGameDomain && (m.source === 'nexus' || m.source === 'vortex-staging' || Boolean(m.mo2)),
+  );
   const keyOf = (domain: string, id: number) => `${domain.toLowerCase()}|${id}`;
   const unique = new Map<string, { gameDomain: string; modId: number }>();
   for (const m of rows) unique.set(keyOf(m.nexusGameDomain!, m.nexusModId!), { gameDomain: m.nexusGameDomain!.toLowerCase(), modId: m.nexusModId! });
