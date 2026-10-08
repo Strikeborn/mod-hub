@@ -81,6 +81,20 @@ export interface ModRecord {
   nexusDownloads?: number;
   /** Installed in a Mod Organizer 2 instance (MO2 owns its profiles; Mod Hub reads them). */
   mo2?: { instance: string; name: string; newestVersion?: string };
+  /** Minecraft mod in a Prism Launcher instance (file = jar name without ".disabled"). */
+  prism?: {
+    instance: string;
+    instanceName: string;
+    file: string;
+    enabled: boolean;
+    loader?: string;
+    mcVersion?: string;
+    modrinthId?: string;
+    curseforgeId?: string;
+    sha1?: string;
+    /** Newer compatible version on Modrinth (set by the update check). */
+    latestVersion?: string;
+  };
   /** Installed through r2modman / Thunderstore Mod Manager (read-only; the manager owns the profile). */
   thunderstore?: { packageName: string; profile: string; websiteUrl?: string; enabled: boolean };
   /** Steam Workshop votes (via the Steam client), refreshed at most daily. */
@@ -278,12 +292,12 @@ export interface CrashReport {
 export interface PlayOption {
   id: string;
   label: string;
-  kind: 'steam' | 'exe' | 'mo2';
+  kind: 'steam' | 'exe' | 'mo2' | 'prism';
   command: string;
   args: string[];
   recommended?: boolean;
   note?: string;
-  /** MO2: available profiles and the one MO2 has selected. */
+  /** MO2 profiles / Prism instances to pick from, and the default one. */
   profiles?: string[];
   profile?: string;
 }

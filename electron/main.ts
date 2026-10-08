@@ -14,6 +14,7 @@ import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
 import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, pluginSync, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
 import { latestCrash } from './crashLogs';
+import { prismLoadOrder, setPrismModsEnabled } from './prism';
 import { bg3ScriptExtenderInstalled, installedPaks, planBg3Order, readModsettings } from './bg3Checks';
 import { planPzOrder } from './pzDeps';
 import { enforceLuaDebugOff, isaacLuaDebugState } from './luaGuard';
@@ -597,6 +598,12 @@ function registerIpc() {
     } catch (e) {
       console.warn('[Mod Hub] Skyrim plugin list read failed:', e);
     }
+    try {
+      const mc = prismLoadOrder(mods, store.loadSettings().playChoices?.minecraft);
+      if (mc) out.minecraft = mc;
+    } catch (e) {
+      console.warn('[Mod Hub] Prism read failed:', e);
+    }
     return out;
   });
   ipcMain.handle('modhub:setPlayChoice', (_e, gameId: string, optionId: string, profile?: string) => {
@@ -879,6 +886,7 @@ function registerIpc() {
     const ids = new Set(modIds);
     const mods = store.loadCatalog().mods.filter((m) => ids.has(m.id) && m.gameId === gameId);
     if (isPluginGame(gameId)) return setPluginModsEnabled(gameId, mods, enabled, store.loadSettings().playChoices?.[gameId]);
+    if (gameId === 'minecraft') return setPrismModsEnabled(mods, enabled, isRunning('javaw.exe'));
     return setModsEnabled(gameId, mods, enabled);
   });
 

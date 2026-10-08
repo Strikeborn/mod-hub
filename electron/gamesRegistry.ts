@@ -4,6 +4,7 @@ import type { GameRecord } from '../shared/types';
 export const GAMES_REGISTRY: GameRecord[] = [
   { id: 'project-zomboid', name: 'Project Zomboid', steamAppId: 108600, modFolderHints: ['mods'] },
   { id: 'rimworld', name: 'RimWorld', steamAppId: 294100, modFolderHints: ['Mods'] },
+  { id: 'minecraft', name: 'Minecraft', modFolderHints: ['mods'] },
   { id: 'skyrimse', name: 'Skyrim Special Edition', steamAppId: 489830, modFolderHints: ['Data'] },
   { id: 'fallout4', name: 'Fallout 4', steamAppId: 377160, modFolderHints: ['Data'] },
   { id: 'cyberpunk2077', name: 'Cyberpunk 2077', steamAppId: 1091500, modFolderHints: ['mods', 'archive'] },

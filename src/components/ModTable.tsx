@@ -33,6 +33,7 @@ function rowTitle(m: ModRecord): string {
 
 /** One short status per row; the detail panel has the full story. */
 function rowStatus(m: ModRecord, trackedNexus?: Set<string>): { text: string; warn?: boolean } {
+  if (m.prism?.latestVersion) return { text: `Update on Modrinth: ${m.prism.latestVersion}`, warn: true };
   if (m.revision.updateAvailable) return { text: 'Update available', warn: true };
   if (m.nexusUpdateAvailable) return { text: `Update on Nexus: ${m.nexusLatestVersion}`, warn: true };
   if (m.localMissing) return { text: 'Missing on disk', warn: true };

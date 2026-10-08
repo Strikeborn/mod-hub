@@ -59,7 +59,7 @@ export function PlayButton({ gameId, beforePlay, compact, active = true, onChoic
       ) {
         return;
       }
-      const r = await window.modHub.playGame(gameId, option.id, option.kind === 'mo2' ? profile : undefined);
+      const r = await window.modHub.playGame(gameId, option.id, option.profiles ? profile : undefined);
       toast(r.message, r.ok ? 'ok' : 'error');
     } finally {
       setBusy(false);
@@ -85,8 +85,8 @@ export function PlayButton({ gameId, beforePlay, compact, active = true, onChoic
           onChange={(e) => {
             setOptionId(e.target.value);
             const o = info.options.find((x) => x.id === e.target.value);
-            const p = o?.kind === 'mo2' ? (profile && o.profiles?.includes(profile) ? profile : o.profile) : undefined;
-            if (o?.kind === 'mo2') setProfile(p);
+            const p = o?.profiles ? (profile && o.profiles.includes(profile) ? profile : o.profile) : undefined;
+            if (o?.profiles) setProfile(p);
             remember(e.target.value, p);
           }}
         >
@@ -98,8 +98,8 @@ export function PlayButton({ gameId, beforePlay, compact, active = true, onChoic
           ))}
         </select>
       )}
-      {option.kind === 'mo2' && option.profiles && option.profiles.length > 1 && (
-        <select className="play-select" value={profile} title="MO2 profile" onChange={(e) => {
+      {option.profiles && option.profiles.length > 1 && (
+        <select className="play-select" value={profile} title={option.kind === 'prism' ? 'Prism instance' : 'MO2 profile'} onChange={(e) => {
           setProfile(e.target.value);
           remember(option.id, e.target.value);
         }}>

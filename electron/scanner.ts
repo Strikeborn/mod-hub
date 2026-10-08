@@ -16,6 +16,7 @@ import { enrichModsWithNexusApi, hydrateNexusFieldsFromPrevious } from './nexusM
 import { applyWorkshopArchive, rememberWorkshopDetails } from './workshopArchive';
 import { scanThunderstoreProfiles } from './thunderstore';
 import { scanMo2Mods } from './mo2';
+import { checkModrinthUpdates, scanPrismMods } from './prism';
 import { scanVortexMetadb } from './vortexMetadbScanner';
 import { syncArchiveVault } from './archiveVault';
 import { readWorkshopAcf } from './workshopAcf';
@@ -194,6 +195,12 @@ export async function scanAllMods(
     scanThunderstoreProfiles(addMod);
   } catch (e) {
     console.warn('[Mod Hub] Thunderstore profile scan failed:', e);
+  }
+  tick('extra', 'Prism Launcher instances (Minecraft)...');
+  try {
+    scanPrismMods(addMod);
+  } catch (e) {
+    console.warn('[Mod Hub] Prism scan failed:', e);
   }
   tick('vortex', 'Vortex staging & downloads...');
   const vortexState = await scanVortexStateModMeta();
@@ -374,6 +381,16 @@ export async function scanAllMods(
     applyWorkshopArchive(mods);
   } catch (e) {
     console.warn('[Mod Hub] workshop archive failed:', e);
+  }
+
+  if (mods.some((m) => m.prism)) {
+    tick('enrich', 'Modrinth: checking Minecraft mods for updates...');
+    try {
+      const n = await checkModrinthUpdates(mods);
+      if (n) tick('enrich', `Modrinth: ${n} update(s) available`);
+    } catch (e) {
+      console.warn('[Mod Hub] Modrinth update check failed:', e);
+    }
   }
 
   applyDuplicateHints(mods);

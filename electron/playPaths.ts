@@ -7,6 +7,7 @@ import type { PlayOption } from '../shared/types';
 import { gameById } from './gamesRegistry';
 import { steamGameDir } from './workshopActions';
 import { findMo2Instances } from './mo2';
+import { findPrismInstances, prismExe } from './prism';
 import { discoverSteamLibraries } from './steamDiscovery';
 
 export { findMo2Instances };
@@ -64,6 +65,24 @@ export function playOptions(gameId: string, remembered: { repentogonLauncher?: s
     }
   }
 
+  if (gameId === 'minecraft') {
+    const exe = prismExe();
+    const instances = findPrismInstances();
+    if (exe && instances.length) {
+      out.push({
+        id: 'prism',
+        label: 'Prism Launcher',
+        kind: 'prism',
+        command: exe,
+        args: ['--launch', instances[0].id],
+        profiles: instances.map((i) => i.id),
+        profile: instances[0].id,
+        recommended: true,
+        note: 'Starts the chosen Prism instance (its mods, loader and Java).',
+      });
+    }
+  }
+
   if (gameId === 'binding-of-isaac') {
     const launcher = findRepentogonLauncher(remembered.repentogonLauncher);
     if (launcher) {
@@ -115,10 +134,13 @@ export async function launchPlayOption(opt: PlayOption, profile?: string): Promi
       return { ok: true, message: 'Starting through Steam…' };
     }
     if (!fs.existsSync(opt.command)) return { ok: false, message: `Not found: ${opt.command}` };
-    const args = opt.kind === 'mo2' && profile ? opt.args.map((a, i) => (opt.args[i - 1] === '-p' ? profile : a)) : opt.args;
+    const args = profile && opt.profiles ? opt.args.map((a, i) => (opt.args[i - 1] === '-p' || opt.args[i - 1] === '--launch' ? profile : a)) : opt.args;
     const child = spawn(opt.command, args, { cwd: path.dirname(opt.command), detached: true, stdio: 'ignore', windowsHide: false });
     child.unref();
-    return { ok: true, message: `Starting ${opt.label}${opt.kind === 'mo2' ? ` (profile “${profile ?? opt.profile}”)` : ''}…` };
+    return {
+      ok: true,
+      message: `Starting ${opt.label}${opt.kind === 'mo2' ? ` (profile “${profile ?? opt.profile}”)` : opt.kind === 'prism' ? ` (instance “${profile ?? opt.profile}”)` : ''}…`,
+    };
   } catch (e) {
     return { ok: false, message: `Couldn't start: ${e instanceof Error ? e.message : String(e)}` };
   }
