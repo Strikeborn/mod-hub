@@ -262,6 +262,18 @@ export interface DefenderSweep {
   threats: { threat: string; file: string; modId?: string; modTitle?: string }[];
 }
 
+/** Newest Crash Logger log for a game, with likely culprits mapped to library mods. */
+export interface CrashReport {
+  gameId: string;
+  file: string;
+  at: string;
+  /** How many crash logs exist in total. */
+  total: number;
+  exception?: string;
+  gameVersion?: string;
+  suspects: { kind: 'dll' | 'plugin'; name: string; count: number; modId?: string; modTitle?: string }[];
+}
+
 /** One way to start a game (best first). */
 export interface PlayOption {
   id: string;
@@ -540,6 +552,13 @@ export type IpcApi = {
   setPlayChoice: (gameId: string, optionId: string, profile?: string) => Promise<void>;
   /** Open the game's plugin sorter (MO2 → Sort runs LOOT; standalone LOOT if installed). */
   openSortTool: (gameId: string) => Promise<{ ok: boolean; message: string }>;
+  /** Compare (apply=false) or copy plugin on/off between Vortex's plugins.txt and the MO2 profile. */
+  pluginSync: (
+    gameId: string,
+    direction: 'vortex-to-mo2' | 'mo2-to-vortex',
+    apply: boolean,
+  ) => Promise<{ ok: boolean; message: string; changed: number; differences: { name: string; vortex: boolean; mo2: boolean }[] }>;
+  getCrashReport: (gameId: string) => Promise<CrashReport | null>;
   applyLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
   saveLoadout: (gameId: string, name: string) => Promise<{ ok: boolean; message: string }>;
   deleteLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;

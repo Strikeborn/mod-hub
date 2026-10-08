@@ -12,7 +12,8 @@ import { GAMES_REGISTRY, gameById, gameBySteamAppId } from './gamesRegistry';
 import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
-import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
+import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, pluginSync, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
+import { latestCrash } from './crashLogs';
 import { planPzOrder } from './pzDeps';
 import { enforceLuaDebugOff, isaacLuaDebugState } from './luaGuard';
 import { backgroundSecurityPass, checkMod, initSecurityStore, lastSweep, recordSweep, securityOverview, securityReport } from './modSecurity';
@@ -601,6 +602,11 @@ function registerIpc() {
     const settings = store.loadSettings();
     store.saveSettings({ playChoices: { ...(settings.playChoices ?? {}), [gameId]: { optionId, profile } } });
   });
+  ipcMain.handle('modhub:pluginSync', (_e, gameId: string, direction: 'vortex-to-mo2' | 'mo2-to-vortex', apply: boolean) => {
+    const ch = store.loadSettings().playChoices?.[gameId];
+    return pluginSync(gameId, direction, ch?.optionId.startsWith('mo2') ? ch : undefined, apply);
+  });
+  ipcMain.handle('modhub:getCrashReport', (_e, gameId: string) => latestCrash(gameId, store.loadCatalog().mods));
   ipcMain.handle('modhub:openSortTool', (_e, gameId: string) => {
     const ctx = pluginContext(gameId, store.loadSettings().playChoices?.[gameId]);
     if (!ctx) return { ok: false, message: 'No plugin sorter for this game.' };

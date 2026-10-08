@@ -1,15 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  CatalogSnapshot,
-  GameLoadOrder,
-  IsaacConflicts,
-  ModLoadState,
-  ModRecord,
-  OrderPlan,
-  ScanProgressEvent,
-  SecurityStatus,
-  ViewMode,
-} from '@shared/types';
+import type { CatalogSnapshot, CrashReport, GameLoadOrder, IsaacConflicts, ModLoadState, ModRecord, OrderPlan, ScanProgressEvent, SecurityStatus, ViewMode } from '@shared/types';
 import { isNexusLikeSource } from './utils/games';
 import { prefetchModThumbnails } from './utils/prefetchThumbnails';
 import { Sidebar } from './components/Sidebar';
@@ -400,6 +390,41 @@ function AppInner() {
     };
   }, [issueGame, pendingOrder, loadOrders]);
 
+  // Skyrim: newest Crash Logger log (re-read with the load order, e.g. when Mod Hub regains focus after a crash).
+  const [crash, setCrash] = useState<CrashReport | null>(null);
+  useEffect(() => {
+    if (!pluginGame || !window.modHub?.getCrashReport) {
+      setCrash(null);
+      return;
+    }
+    let cancelled = false;
+    void window.modHub.getCrashReport(pluginGame).then((c) => {
+      if (!cancelled) setCrash(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pluginGame, loadOrders]);
+
+  const syncPlugins = async (direction: 'vortex-to-mo2' | 'mo2-to-vortex') => {
+    if (!pluginGame) return;
+    const preview = await window.modHub.pluginSync(pluginGame, direction, false);
+    if (!preview.ok || preview.differences.length === 0) {
+      toast(preview.message, preview.ok ? 'info' : 'error');
+      return;
+    }
+    const lines = preview.differences
+      .slice(0, 20)
+      .map((d) => `• ${d.name}: Vortex ${d.vortex ? 'on' : 'off'}, MO2 ${d.mo2 ? 'on' : 'off'}`)
+      .join('\n');
+    const what = direction === 'vortex-to-mo2' ? "Make the MO2 profile match Vortex's plugin list" : "Make Vortex's plugin list match the MO2 profile";
+    const note = direction === 'mo2-to-vortex' ? '\n\nVortex must be closed. ' : '\n\nMO2 must be closed. ';
+    if (!window.confirm(`${what}?\n\n${lines}${note}The file is backed up first.`)) return;
+    const r = await window.modHub.pluginSync(pluginGame, direction, true);
+    toast(r.message, r.ok ? 'ok' : 'error');
+    if (r.ok) await refreshLoadOrders();
+  };
+
   // Isaac: mods replacing the same resource files (re-read whenever the enabled state changes).
   const [isaacConflicts, setIsaacConflicts] = useState<IsaacConflicts | null>(null);
   const [showConflicts, setShowConflicts] = useState(false);
@@ -783,6 +808,26 @@ function AppInner() {
                         Auto-sort
                       </button>
                       )}
+                      {pluginGame && !loadOrders.skyrimse?.readOnly && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            title="Switch plugins on/off in this MO2 profile to match Vortex's plugin list (plugins both know)"
+                            onClick={() => void syncPlugins('vortex-to-mo2')}
+                          >
+                            Vortex → MO2
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            title="Switch plugins on/off in Vortex's plugin list to match this MO2 profile (Vortex must be closed)"
+                            onClick={() => void syncPlugins('mo2-to-vortex')}
+                          >
+                            MO2 → Vortex
+                          </button>
+                        </>
+                      )}
                       {pluginGame && (
                         <button
                           type="button"
@@ -926,6 +971,29 @@ function AppInner() {
               ))}
             </div>
           )}
+          {tab === 'library' && pluginGame && crash ? (
+            <div className="crash-summary">
+              <strong>Last crash</strong> {new Date(crash.at).toLocaleString()}
+              {crash.exception ? ` · ${crash.exception}` : ''}
+              {crash.suspects.length ? (
+                <>
+                  {' · Likely: '}
+                  {crash.suspects.slice(0, 4).map((s, i) => (
+                    <span key={`${s.kind}${s.name}`} title={`${s.kind === 'dll' ? 'In the crash call stack' : 'Objects from this plugin were involved'} (${s.count}×)`}>
+                      {i ? ', ' : ''}
+                      <strong>{s.name}</strong>
+                      {s.modTitle ? ` (${s.modTitle})` : ''}
+                    </span>
+                  ))}
+                </>
+              ) : (
+                ' · no mod named (the game itself or a driver)'
+              )}
+              <button type="button" className="btn btn-xs" onClick={() => void window.modHub.openPath(crash.file)}>
+                Open log
+              </button>
+            </div>
+          ) : null}
           {tab === 'library' && pluginGame && loadOrders.skyrimse?.implicit?.length ? (
             <div className="order-hint">
               Load order 1–{loadOrders.skyrimse.implicit.length} is the base game, DLC and Creation Club (

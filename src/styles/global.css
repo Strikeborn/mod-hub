@@ -2174,3 +2174,15 @@ button.sec-pill {
 .loadout-meta .muted {
   color: var(--text-muted);
 }
+
+.crash-summary {
+  font-size: 0.8rem;
+  margin: 0 0 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid #f08a7a;
+  background: rgba(240, 138, 122, 0.08);
+}
+
+.crash-summary .btn-xs {
+  margin-left: 0.5rem;
+}
