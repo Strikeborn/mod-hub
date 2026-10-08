@@ -337,6 +337,12 @@ export interface ModLoadState {
   position?: number;
   /** Another tool owns this list (BG3: Vortex writes modsettings.lsx), so Mod Hub only shows it. */
   readOnly?: boolean;
+  /** Who owns it when read-only (shown next to the state). Default "Vortex". */
+  lockedBy?: string;
+  /** Entries in the game's list that belong to this mod (Skyrim: its .esp/.esm/.esl plugins). */
+  items?: string[];
+  /** Short explanation shown under the state (plugins on/off, SKSE DLLs). */
+  note?: string;
 }
 
 /** Enabled mods + order for one game, as the game itself will load them. */
@@ -352,6 +358,8 @@ export interface GameLoadOrder {
   enabledCount: number;
   /** Another tool owns this list (BG3 → Vortex); Mod Hub shows it but doesn't change it. */
   readOnly?: boolean;
+  /** Plugins the game always loads first (Skyrim: base game, DLC, Creation Club); they take positions 1..n. */
+  implicit?: string[];
   /** Enabled entries with no matching catalog row: DLC/core, or mods that aren't installed. */
   unmatched: { id: string; position: number; note?: string }[];
   readAt: string;
@@ -406,6 +414,12 @@ export interface LoadoutsForGame {
   loadouts: Loadout[];
   /** Lists owned by another tool (MO2): Mod Hub picks one for Play instead of rewriting it. */
   managedBy?: 'mo2';
+  /** Installed mods that can be added to a list (id as the list stores it + display title). */
+  candidates?: { id: string; title: string }[];
+  /** MO2 lists can be edited (Skyrim: plugins + MO2 mods per profile). */
+  editable?: boolean;
+  /** Mods that load in every profile (Vortex-deployed, no plugin), so lists don't count them. */
+  alwaysOn?: number;
 }
 
 export interface ScanOptions {
@@ -522,11 +536,17 @@ export type IpcApi = {
   planLoadOrder: (gameId: string, order?: string[]) => Promise<OrderPlan | null>;
   /** Save a reordered enabled list (same mods, new order). */
   setLoadOrder: (gameId: string, ids: string[]) => Promise<{ ok: boolean; message: string; changed: number }>;
+  /** Remember the ▶ Play launcher/profile (Skyrim: also picks which plugin list the library shows). */
+  setPlayChoice: (gameId: string, optionId: string, profile?: string) => Promise<void>;
+  /** Open the game's plugin sorter (MO2 → Sort runs LOOT; standalone LOOT if installed). */
+  openSortTool: (gameId: string) => Promise<{ ok: boolean; message: string }>;
   applyLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
   saveLoadout: (gameId: string, name: string) => Promise<{ ok: boolean; message: string }>;
   deleteLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
   /** Overwrite a saved list with the current enabled mods. */
   updateLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
+  /** Replace a saved list's mods (added / removed / reordered in the editor). */
+  editLoadout: (gameId: string, loadoutId: string, ids: string[]) => Promise<{ ok: boolean; message: string }>;
   /** PZ: make one save load a list. */
   applyLoadoutToSave: (loadoutId: string, saveId: string) => Promise<{ ok: boolean; message: string }>;
   exportLoadoutCode: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string; code?: string }>;

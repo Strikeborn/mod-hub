@@ -188,14 +188,14 @@ function AppInner() {
     const pos = new Map(pendingOrder.ids.map((id, i) => [rwNorm(id), i + 1]));
     const map = new Map(savedLoadStates);
     for (const m of catalog.mods) {
-      if (m.gameId !== 'rimworld') continue;
+      if (m.gameId !== gameFilter) continue;
       const st = map.get(m.id);
       if (!st?.enabled) continue;
-      const p = Math.min(...(m.modIds ?? []).map((x) => pos.get(rwNorm(x)) ?? Infinity));
+      const p = Math.min(...(st.items ?? m.modIds ?? []).map((x) => pos.get(rwNorm(x)) ?? Infinity));
       if (Number.isFinite(p)) map.set(m.id, { ...st, position: p });
     }
     return map;
-  }, [pendingOrder, savedLoadStates, catalog.mods]);
+  }, [pendingOrder, savedLoadStates, catalog.mods, gameFilter]);
 
   useEffect(() => {
     reload();
@@ -371,10 +371,17 @@ function AppInner() {
   const shownEnabled = useMemo(() => filtered.filter((m) => loadStates.get(m.id)?.enabled).length, [filtered, loadStates]);
   const shownToggleable = useMemo(() => filtered.filter((m) => loadStates.has(m.id)), [filtered, loadStates]);
 
-  const orderGame = gameFilter === 'rimworld' && loadOrders.rimworld ? 'rimworld' : null;
-  /** Games with an issues check (RimWorld order + deps, PZ deps). */
+  /** Games with Auto-sort + Save order: RimWorld (About.xml rules) and Skyrim (plugin masters, MO2 profile). */
+  const orderGame =
+    gameFilter === 'rimworld' && loadOrders.rimworld
+      ? 'rimworld'
+      : gameFilter === 'skyrimse' && loadOrders.skyrimse && !loadOrders.skyrimse.readOnly
+        ? 'skyrimse'
+        : null;
+  const pluginGame = gameFilter === 'skyrimse' && loadOrders.skyrimse ? 'skyrimse' : null;
+  /** Games with an issues check (RimWorld order + deps, PZ deps, Skyrim plugin masters). */
   const issueGame =
-    orderGame ?? (gameFilter === 'project-zomboid' && loadOrders['project-zomboid'] ? 'project-zomboid' : null);
+    orderGame ?? pluginGame ?? (gameFilter === 'project-zomboid' && loadOrders['project-zomboid'] ? 'project-zomboid' : null);
   useEffect(() => {
     setPendingOrder(null);
     setShowOrderIssues(false);
@@ -385,7 +392,7 @@ function AppInner() {
       return;
     }
     let cancelled = false;
-    void window.modHub.planLoadOrder(issueGame, issueGame === 'rimworld' ? pendingOrder?.ids : undefined).then((p) => {
+    void window.modHub.planLoadOrder(issueGame, issueGame === orderGame ? pendingOrder?.ids : undefined).then((p) => {
       if (!cancelled) setOrderPlan(p);
     });
     return () => {
@@ -450,7 +457,7 @@ function AppInner() {
 
   const saveOrder = async () => {
     if (!pendingOrder || !window.modHub?.setLoadOrder) return;
-    const r = await window.modHub.setLoadOrder('rimworld', pendingOrder.ids);
+    const r = await window.modHub.setLoadOrder(orderGame ?? 'rimworld', pendingOrder.ids);
     toast(r.message, r.ok ? 'ok' : 'error');
     if (r.ok) {
       setPendingOrder(null);
@@ -749,6 +756,10 @@ function AppInner() {
                   {gameFilter !== 'all' && (
                     <PlayButton
                       gameId={gameFilter}
+                      onChoiceChange={() => {
+                        setPendingOrder(null);
+                        void refreshLoadOrders();
+                      }}
                       beforePlay={() =>
                         !pendingOrder ||
                         window.confirm('You have an unsaved load order. Play with the order that is saved now (the unsaved changes stay pending)?')
@@ -762,11 +773,28 @@ function AppInner() {
                         type="button"
                         className="btn btn-sm"
                         disabled={!orderPlan}
-                        title="Sort by each mod's About.xml rules (dependencies, loadAfter/loadBefore). Only rule-breaking mods move. Nothing is saved until you click Save order."
+                        title={
+                          orderGame === 'skyrimse'
+                            ? 'Masters (ESM/ESL) first, and every plugin after the masters it needs. Everything else keeps its place (so a LOOT order stays). Nothing is saved until you click Save order.'
+                            : "Sort by each mod's About.xml rules (dependencies, loadAfter/loadBefore). Only rule-breaking mods move. Nothing is saved until you click Save order."
+                        }
                         onClick={autoSort}
                       >
                         Auto-sort
                       </button>
+                      )}
+                      {pluginGame && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          title="Full LOOT sort (masterlist rules). With an MO2 profile this opens MO2 on that profile: click Sort in its Plugins tab."
+                          onClick={async () => {
+                            const r = await window.modHub.openSortTool(pluginGame);
+                            toast(r.message, r.ok ? 'info' : 'error');
+                          }}
+                        >
+                          LOOT sort…
+                        </button>
                       )}
                       {orderPlan && (
                         <button
@@ -898,16 +926,29 @@ function AppInner() {
               ))}
             </div>
           )}
+          {tab === 'library' && pluginGame && loadOrders.skyrimse?.implicit?.length ? (
+            <div className="order-hint">
+              Load order 1–{loadOrders.skyrimse.implicit.length} is the base game, DLC and Creation Club (
+              {loadOrders.skyrimse.implicit.join(', ')}). Mods without a plugin (SKSE DLLs, assets) show “·”: they have no
+              load order number. Reading {loadOrders.skyrimse.sourceLabel}.
+            </div>
+          ) : null}
           {tab === 'library' && issueGame && showOrderIssues && orderPlan && (
             <ul className="order-issues">
-              {orderPlan.issues.length === 0 && <li>No problems: every dependency and loadAfter/loadBefore rule is satisfied.</li>}
+                  {orderPlan.issues.length === 0 && (
+                    <li>
+                      {issueGame === 'skyrimse'
+                        ? 'No problems: every active plugin has its masters, loading before it, and no SKSE DLL loads without its plugin.'
+                        : 'No problems: every dependency and loadAfter/loadBefore rule is satisfied.'}
+                    </li>
+                  )}
               {orderPlan.issues.map((i, n) => (
                 <li key={n} className={`issue-${i.kind}`}>
                   <span className="order-issue-kind">{ISSUE_LABELS[i.kind]}</span>
                   {i.message}
                   {i.kind === 'dependency-off' && i.otherId && (() => {
                     const dep = catalog.mods.find(
-                      (m) => m.gameId === issueGame && (m.modIds ?? []).some((x) => rwNorm(x) === rwNorm(i.otherId!)),
+                      (m) => m.gameId === issueGame && (m.id === i.otherId || (m.modIds ?? []).some((x) => rwNorm(x) === rwNorm(i.otherId!))),
                     );
                     return dep ? (
                       <button type="button" className="btn btn-xs" onClick={() => void onToggleEnabled(dep, true)}>
@@ -915,7 +956,7 @@ function AppInner() {
                       </button>
                     ) : null;
                   })()}
-                  {i.kind === 'dependency-missing' && i.otherId && (
+                  {i.kind === 'dependency-missing' && i.otherId && issueGame !== 'skyrimse' && (
                     <button
                       type="button"
                       className="btn btn-xs"
@@ -936,7 +977,7 @@ function AppInner() {
           )}
           {tab === 'library' && (
             <LibraryView
-              onReorder={orderGame && sortMode === 'load-order' ? onReorder : undefined}
+              onReorder={orderGame === 'rimworld' && sortMode === 'load-order' ? onReorder : undefined}
               orderSortActive={Boolean(activeLoadOrder) && sortMode === 'load-order'}
               conflicts={isaacConflicts?.perMod}
               security={security}

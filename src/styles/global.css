@@ -2102,3 +2102,75 @@ button.sec-pill {
 .sweep-summary .sec-threat {
   color: #f08a7a;
 }
+
+.mod-table-note {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  max-width: 22rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loadout-editor .loadout-mods li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.loadout-edit-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-add {
+  margin: 0.5rem 0;
+}
+
+.loadout-add input {
+  width: 100%;
+  max-width: 28rem;
+}
+
+.loadout-add-results {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+
+.loadout-add-results li {
+  padding: 0.15rem 0;
+}
+
+.loadout-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.loadout-edit-actions .muted,
+.loadout-add-results .muted {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.order-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0 0 0.4rem;
+}
+
+.order-none {
+  color: var(--text-muted);
+}
+
+.loadout-meta .muted {
+  color: var(--text-muted);
+}

@@ -9,10 +9,12 @@ type Props = {
   compact?: boolean;
   /** Games grid: don't ask the main process until the card is hovered/focused (`active`). */
   active?: boolean;
+  /** The launcher/profile pick changed (saved right away; Skyrim's library shows that profile's plugins). */
+  onChoiceChange?: () => void;
 };
 
 /** ▶ Play with a launcher picker (MO2 executables + profile, REPENTOGON, SKSE, Steam) and pre-launch warnings. */
-export function PlayButton({ gameId, beforePlay, compact, active = true }: Props) {
+export function PlayButton({ gameId, beforePlay, compact, active = true, onChoiceChange }: Props) {
   const [info, setInfo] = useState<PlayInfo | null>(null);
   const [optionId, setOptionId] = useState<string | undefined>();
   const [profile, setProfile] = useState<string | undefined>();
@@ -30,6 +32,10 @@ export function PlayButton({ gameId, beforePlay, compact, active = true }: Props
   useEffect(() => {
     if (active && !info) void refresh();
   }, [refresh, active, info]);
+
+  const remember = (id: string, p?: string) => {
+    void window.modHub?.setPlayChoice?.(gameId, id, p).then(() => onChoiceChange?.());
+  };
 
   if (!info) return active ? <span className="play-group play-loading">…</span> : null;
   if (info.options.length === 0) return null;
@@ -79,7 +85,9 @@ export function PlayButton({ gameId, beforePlay, compact, active = true }: Props
           onChange={(e) => {
             setOptionId(e.target.value);
             const o = info.options.find((x) => x.id === e.target.value);
-            if (o?.kind === 'mo2') setProfile(profile && o.profiles?.includes(profile) ? profile : o.profile);
+            const p = o?.kind === 'mo2' ? (profile && o.profiles?.includes(profile) ? profile : o.profile) : undefined;
+            if (o?.kind === 'mo2') setProfile(p);
+            remember(e.target.value, p);
           }}
         >
           {info.options.map((o) => (
@@ -91,7 +99,10 @@ export function PlayButton({ gameId, beforePlay, compact, active = true }: Props
         </select>
       )}
       {option.kind === 'mo2' && option.profiles && option.profiles.length > 1 && (
-        <select className="play-select" value={profile} title="MO2 profile" onChange={(e) => setProfile(e.target.value)}>
+        <select className="play-select" value={profile} title="MO2 profile" onChange={(e) => {
+          setProfile(e.target.value);
+          remember(option.id, e.target.value);
+        }}>
           {option.profiles.map((p) => (
             <option key={p} value={p}>
               {p}

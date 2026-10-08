@@ -12,6 +12,7 @@ import { GAMES_REGISTRY, gameById, gameBySteamAppId } from './gamesRegistry';
 import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
+import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
 import { planPzOrder } from './pzDeps';
 import { enforceLuaDebugOff, isaacLuaDebugState } from './luaGuard';
 import { backgroundSecurityPass, checkMod, initSecurityStore, lastSweep, recordSweep, securityOverview, securityReport } from './modSecurity';
@@ -26,7 +27,9 @@ import { planRimworldOrder, readRimworldActive } from './rimworldSort';
 import {
   applyLoadout,
   applyLoadoutToPzSave,
+  copyMo2Profile,
   deleteLoadout,
+  editLoadout,
   exportLoadoutCode,
   getLoadouts,
   importLoadoutCode,
@@ -582,7 +585,43 @@ function registerIpc() {
     return cat;
   };
 
-  ipcMain.handle('modhub:getLoadOrders', () => readLoadOrders(store.loadCatalog().mods));
+  ipcMain.handle('modhub:getLoadOrders', () => {
+    const mods = store.loadCatalog().mods;
+    const out = readLoadOrders(mods);
+    // Skyrim: plugin order from the list ▶ Play will use (chosen MO2 profile, else Vortex's plugins.txt).
+    try {
+      const sk = pluginLoadOrder('skyrimse', mods, store.loadSettings().playChoices?.skyrimse);
+      if (sk) out.skyrimse = sk;
+    } catch (e) {
+      console.warn('[Mod Hub] Skyrim plugin list read failed:', e);
+    }
+    return out;
+  });
+  ipcMain.handle('modhub:setPlayChoice', (_e, gameId: string, optionId: string, profile?: string) => {
+    const settings = store.loadSettings();
+    store.saveSettings({ playChoices: { ...(settings.playChoices ?? {}), [gameId]: { optionId, profile } } });
+  });
+  ipcMain.handle('modhub:openSortTool', (_e, gameId: string) => {
+    const ctx = pluginContext(gameId, store.loadSettings().playChoices?.[gameId]);
+    if (!ctx) return { ok: false, message: 'No plugin sorter for this game.' };
+    try {
+      if (ctx.inst && ctx.profile) {
+        spawn(ctx.inst.exe, ['-p', ctx.profile], { cwd: ctx.inst.root, detached: true, stdio: 'ignore' }).unref();
+        return {
+          ok: true,
+          message: `Opened MO2 on “${ctx.profile}”. In its Plugins tab, click Sort (runs LOOT inside MO2), then close MO2 so Mod Hub sees the new order.`,
+        };
+      }
+      const loot = lootExe();
+      if (loot) {
+        spawn(loot, [], { cwd: path.dirname(loot), detached: true, stdio: 'ignore' }).unref();
+        return { ok: true, message: 'Opened LOOT. Sort, then Apply. Vortex may re-sort on its next deploy.' };
+      }
+      return { ok: false, message: "Vortex sorts this list with LOOT itself (Plugins tab → Sort Now). LOOT isn't installed separately." };
+    } catch (e) {
+      return { ok: false, message: `Couldn't open the sorter: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  });
   ipcMain.handle('modhub:getIsaacConflicts', () => analyzeIsaacConflicts(store.loadCatalog().mods));
 
   ipcMain.handle('modhub:setIsaacFolderEnabled', (_e, folder: string, enabled: boolean) => setIsaacFolderEnabled(folder, enabled));
@@ -784,7 +823,12 @@ function registerIpc() {
     }
     return applyLoadout(gameId, id, store.loadCatalog().mods);
   });
-  ipcMain.handle('modhub:saveLoadout', (_e, gameId: string, name: string) => saveCurrentLoadout(gameId, name, store.loadCatalog().mods));
+  ipcMain.handle('modhub:saveLoadout', (_e, gameId: string, name: string) =>
+    findMo2Instances().some((i) => i.gameId === gameId)
+      ? copyMo2Profile(gameId, name, store.loadSettings().playChoices?.[gameId]?.profile)
+      : saveCurrentLoadout(gameId, name, store.loadCatalog().mods),
+  );
+  ipcMain.handle('modhub:editLoadout', (_e, gameId: string, id: string, ids: string[]) => editLoadout(gameId, id, ids, store.loadCatalog().mods));
   ipcMain.handle('modhub:applyLoadoutToSave', (_e, id: string, saveId: string) => applyLoadoutToPzSave(id, saveId, store.loadCatalog().mods));
   ipcMain.handle('modhub:exportLoadoutCode', (_e, gameId: string, id: string) => exportLoadoutCode(gameId, id, store.loadCatalog().mods));
   ipcMain.handle('modhub:importLoadoutCode', (_e, code: string) => importLoadoutCode(code, store.loadCatalog().mods));
@@ -793,6 +837,7 @@ function registerIpc() {
 
   ipcMain.handle('modhub:planLoadOrder', (_e, gameId: string, order?: string[]) => {
     const mods = store.loadCatalog().mods;
+    if (isPluginGame(gameId)) return planPluginOrder(gameId, mods, store.loadSettings().playChoices?.[gameId], order);
     if (gameId === 'project-zomboid') {
       let pzOrder = order;
       if (!pzOrder) {
@@ -808,11 +853,14 @@ function registerIpc() {
     const current = order ?? readRimworldActive();
     return planRimworldOrder(current, mods);
   });
-  ipcMain.handle('modhub:setLoadOrder', (_e, gameId: string, ids: string[]) => setLoadOrder(gameId, ids));
+  ipcMain.handle('modhub:setLoadOrder', (_e, gameId: string, ids: string[]) =>
+    isPluginGame(gameId) ? setPluginOrder(gameId, ids, store.loadSettings().playChoices?.[gameId]) : setLoadOrder(gameId, ids),
+  );
 
   ipcMain.handle('modhub:setModsEnabled', (_e, gameId: string, modIds: string[], enabled: boolean) => {
     const ids = new Set(modIds);
     const mods = store.loadCatalog().mods.filter((m) => ids.has(m.id) && m.gameId === gameId);
+    if (isPluginGame(gameId)) return setPluginModsEnabled(gameId, mods, enabled, store.loadSettings().playChoices?.[gameId]);
     return setModsEnabled(gameId, mods, enabled);
   });
 

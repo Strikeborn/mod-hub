@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Loadout, LoadoutsForGame, ModRecord } from '../shared/types';
-import { isaacModsDir, pzDefaultModsFile, rimworldModsConfigFile } from './loadOrder';
+import { isaacFolderForMod, isaacModsDir, pzDefaultModsFile, rimworldModsConfigFile } from './loadOrder';
 import { GAME_EXE, backup, backupRoot, isRunning } from './loadOrderWrite';
 import { findMo2Instances, readMo2Modlist } from './mo2';
 import { planRimworldOrder } from './rimworldSort';
+import { isPluginGame, pluginLoadOrder, setPluginModsEnabled } from './bethesdaPlugins';
 
 /**
  * Loadouts = named mod lists per game, kept where the game itself keeps them when it has its own format
@@ -230,11 +231,20 @@ const GAMES: Record<
 };
 
 /** MO2 profiles for a game: shown as loadouts; "apply" means "use this profile for Play" (MO2 owns the files). */
-function mo2Loadouts(gameId: string): LoadoutsForGame | null {
+function mo2Loadouts(gameId: string, mods: ModRecord[]): LoadoutsForGame | null {
   const inst = findMo2Instances().find((i) => i.gameId === gameId);
   if (!inst) return null;
   const selected = inst.selectedProfile ?? inst.profiles[0];
-  const enabledOf = (p: string) => readMo2Modlist(inst, p).filter((e) => e.enabled).map((e) => e.name).reverse();
+  // Plugin games (Skyrim): a profile's list = the library mods it switches on (MO2 mods + plugins), by load order.
+  const plugin = isPluginGame(gameId);
+  const enabledOf = (p: string) => {
+    if (!plugin) return readMo2Modlist(inst, p).filter((e) => e.enabled).map((e) => e.name).reverse();
+    const lo = pluginLoadOrder(gameId, mods, { optionId: 'mo2', profile: p });
+    return Object.entries(lo?.mods ?? {})
+      .filter(([, s]) => s.enabled && !s.readOnly)
+      .sort(([a, x], [b, y]) => (x.position ?? 0) - (y.position ?? 0) || titleOf(mods, a).localeCompare(titleOf(mods, b)))
+      .map(([id]) => id);
+  };
   const current = selected ? enabledOf(selected) : [];
   const cur = new Set(current.map((x) => x.toLowerCase()));
   const loadouts: Loadout[] = inst.profiles.map((p) => {
@@ -257,11 +267,101 @@ function mo2Loadouts(gameId: string): LoadoutsForGame | null {
       canDelete: false,
     };
   });
-  return { gameId, supported: true, current, loadouts, managedBy: 'mo2' };
+  const candidates = plugin
+    ? Object.entries(pluginLoadOrder(gameId, mods, { optionId: 'mo2', profile: selected })?.mods ?? {})
+        .filter(([, s]) => !s.readOnly)
+        .map(([id]) => ({ id, title: titleOf(mods, id) }))
+    : undefined;
+  const alwaysOn = plugin
+    ? Object.values(pluginLoadOrder(gameId, mods, { optionId: 'mo2', profile: selected })?.mods ?? {}).filter((s) => s.readOnly && s.enabled).length
+    : undefined;
+  return { gameId, supported: true, current, loadouts, managedBy: 'mo2', candidates, editable: plugin, alwaysOn };
+}
+
+function titleOf(mods: ModRecord[], id: string): string {
+  return mods.find((m) => m.id === id)?.title ?? id;
+}
+
+/** Installed mods a list can hold, as the list stores them (package id / Isaac folder name). */
+function loadoutCandidates(gameId: string, mods: ModRecord[]): { id: string; title: string }[] {
+  const own = mods.filter((m) => m.gameId === gameId);
+  if (gameId === 'binding-of-isaac') {
+    const dir = isaacModsDir();
+    if (!dir) return [];
+    const folders = isaacFolders();
+    return own.flatMap((m) => {
+      const f = isaacFolderForMod(m, dir, folders);
+      return f ? [{ id: f, title: m.title }] : [];
+    });
+  }
+  const out = own.flatMap((m) => (m.modIds ?? []).map((id) => ({ id, title: (m.modIds?.length ?? 0) > 1 ? `${m.title} (${id})` : m.title })));
+  if (gameId === 'rimworld') for (const [id, title] of Object.entries(RIMWORLD_CORE_NAMES)) out.push({ id, title });
+  return out;
+}
+
+/** Copy the chosen MO2 profile (mod list, plugins, profile INIs; not saves) to a new profile. */
+export function copyMo2Profile(gameId: string, name: string, fromProfile?: string): Result {
+  const inst = findMo2Instances().find((i) => i.gameId === gameId);
+  if (!inst) return { ok: false, message: 'Mod Organizer 2 not found for this game.' };
+  if (isRunning('ModOrganizer.exe')) return { ok: false, message: 'Close Mod Organizer 2 first (it rewrites its profiles).' };
+  const clean = safeFileName(name.trim());
+  if (!clean) return { ok: false, message: 'Give the profile a name.' };
+  const src = fromProfile && inst.profiles.includes(fromProfile) ? fromProfile : (inst.selectedProfile ?? inst.profiles[0]);
+  if (!src) return { ok: false, message: 'No MO2 profile to copy.' };
+  const from = path.join(inst.root, 'profiles', src);
+  const to = path.join(inst.root, 'profiles', clean);
+  if (fs.existsSync(to)) return { ok: false, message: `An MO2 profile called “${clean}” already exists.` };
+  try {
+    fs.mkdirSync(to, { recursive: true });
+    for (const f of fs.readdirSync(from, { withFileTypes: true })) if (f.isFile()) fs.copyFileSync(path.join(from, f.name), path.join(to, f.name));
+    return { ok: true, message: `Made MO2 profile “${clean}” (copy of “${src}”). Edit it here or in MO2.` };
+  } catch (e) {
+    return { ok: false, message: `Couldn't copy the profile: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** Replace a list's mods with `ids` (from the Loadouts editor). MO2 profiles: switches mods/plugins on/off. */
+export function editLoadout(gameId: string, loadoutId: string, ids: string[], mods: ModRecord[]): Result {
+  const all = getLoadouts(gameId, mods);
+  const l = all.loadouts.find((x) => x.id === loadoutId);
+  if (!l) return { ok: false, message: 'Loadout not found.' };
+  const unique = ids.filter((id, i) => ids.findIndex((x) => x.toLowerCase() === id.toLowerCase()) === i);
+  if (all.managedBy === 'mo2') {
+    if (!all.editable) return { ok: false, message: 'Edit this profile in Mod Organizer 2.' };
+    const profile = loadoutId.replace(/^mo2:/, '');
+    const was = new Set(l.ids);
+    const now = new Set(unique);
+    const on = mods.filter((m) => now.has(m.id) && !was.has(m.id));
+    const off = mods.filter((m) => was.has(m.id) && !now.has(m.id));
+    const choice = { optionId: 'mo2', profile };
+    const msgs: string[] = [];
+    if (on.length) {
+      const r = setPluginModsEnabled(gameId, on, true, choice);
+      if (!r.ok) return r;
+      msgs.push(`+${on.length}`);
+    }
+    if (off.length) {
+      const r = setPluginModsEnabled(gameId, off, false, choice);
+      if (!r.ok) return r;
+      msgs.push(`−${off.length}`);
+    }
+    return { ok: true, message: msgs.length ? `Updated MO2 profile “${profile}” (${msgs.join(', ')}).` : 'Nothing changed.' };
+  }
+  if (l.kind === 'save') return { ok: false, message: "A save's list can't be edited here. Edit a saved list, then use “Apply to save…”." };
+  if (gameId === 'rimworld' && l.path && /\.rml$/i.test(l.path)) return saveCurrentLoadout(gameId, l.name, mods, l.path, unique);
+  if (l.kind === 'modhub' && l.path) backup(gameId, l.path);
+  const r = saveCurrentLoadout(gameId, l.name, mods, undefined, unique);
+  if (r.ok && gameId === 'rimworld' && l.path && fs.existsSync(l.path)) {
+    // Older .xml list: now saved as a RimWorld .rml with the same name; retire the .xml to backups.
+    const dest = path.join(backupRoot(), gameId, 'removed-loadouts');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.renameSync(l.path, path.join(dest, `${Date.now()}-${path.basename(l.path)}`));
+  }
+  return r;
 }
 
 export function getLoadouts(gameId: string, mods: ModRecord[]): LoadoutsForGame {
-  const viaMo2 = mo2Loadouts(gameId);
+  const viaMo2 = mo2Loadouts(gameId, mods);
   if (viaMo2) return viaMo2;
   const g = GAMES[gameId];
   if (!g) return { gameId, supported: false, current: [], loadouts: [] };
@@ -279,7 +379,7 @@ export function getLoadouts(gameId: string, mods: ModRecord[]): LoadoutsForGame 
     return { ...l, count: l.ids.length, missing, toEnable, toDisable, isCurrent: toEnable === 0 && toDisable === 0 && (gameId === 'binding-of-isaac' || sameOrder) };
   });
   loadouts.sort((a, b) => (b.modifiedAt ?? '').localeCompare(a.modifiedAt ?? ''));
-  return { gameId, supported: true, current, loadouts };
+  return { gameId, supported: true, current, loadouts, candidates: loadoutCandidates(gameId, mods) };
 }
 
 function guard(gameId: string): Result | null {

@@ -173,7 +173,18 @@ const Row = memo(function Row({
           <ModThumbnail path={bestPreviewFilePath(mod)} remoteUrl={mod.remotePreviewUrl} title={title} />
         </button>
       </td>
-      <td className="col-num col-order">{loadState?.enabled ? loadState.position : ''}</td>
+      <td
+        className="col-num col-order"
+        title={
+          loadState?.position
+            ? undefined
+            : loadState?.items && loadState.items.length === 0
+              ? 'No plugin (.esp/.esm/.esl): SKSE DLLs and assets have no load order number'
+              : undefined
+        }
+      >
+        {loadState?.enabled ? (loadState.position ?? (loadState.items?.length === 0 ? <span className="order-none">·</span> : '')) : ''}
+      </td>
       <td className="col-title">
         <button type="button" className="mod-table-title" title={title} onClick={() => openModDetails(mod)}>
           {title}
@@ -220,11 +231,16 @@ const Row = memo(function Row({
         ) : (
           <span
             className={`mod-table-ingame${loadState?.enabled ? ' on' : loadState ? ' off' : ''}`}
-            title={loadState?.readOnly ? 'Managed by Vortex: change it there' : undefined}
+            title={loadState?.readOnly ? `Managed by ${loadState.lockedBy ?? 'Vortex'}: change it there` : undefined}
           >
             {inGameText(mod, loadState)}
-            {loadState?.readOnly ? ' (Vortex)' : ''}
+            {loadState?.readOnly ? ` (${loadState.lockedBy ?? 'Vortex'})` : ''}
           </span>
+        )}
+        {loadState?.note && (
+          <div className="mod-table-note" title={loadState.note}>
+            {loadState.note}
+          </div>
         )}
       </td>
       <td>

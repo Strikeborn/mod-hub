@@ -16,7 +16,7 @@ const GAMES: { id: string; name: string; note: string }[] = [
   {
     id: 'skyrimse',
     name: 'Skyrim SE (MO2)',
-    note: 'Mod Organizer 2 profiles. MO2 owns them, so Mod Hub doesn’t rewrite them: pick one for ▶ Play, edit them in MO2.',
+    note: 'Mod Organizer 2 profiles. Edit one here (MO2 must be closed): its MO2 mods and plugins switch on/off. Vortex-deployed SKSE mods without a plugin load in every profile.',
   },
 ];
 
@@ -49,6 +49,9 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   const [newName, setNewName] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [importCode, setImportCode] = useState('');
+  /** List being edited (not saved until Save changes). */
+  const [draft, setDraft] = useState<{ id: string; ids: string[] } | null>(null);
+  const [addQuery, setAddQuery] = useState('');
 
   const refresh = useCallback(async () => {
     if (!window.modHub?.getLoadouts) return;
@@ -58,6 +61,7 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   useEffect(() => {
     setData(null);
     setOpen(null);
+    setDraft(null);
     void refresh();
   }, [refresh]);
 
@@ -69,6 +73,37 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   }, [refresh]);
 
   const index = useMemo(() => titleIndex(catalog, gameId), [catalog, gameId]);
+  const candidateTitle = useMemo(() => new Map((data?.candidates ?? []).map((c) => [c.id.toLowerCase(), c.title])), [data]);
+  const label = (id: string) => candidateTitle.get(id.toLowerCase()) ?? nameFor(index, gameId, id);
+  const isMo2 = data?.managedBy === 'mo2';
+  const canEdit = (l: Loadout) => l.kind !== 'save' && (!isMo2 || Boolean(data?.editable));
+  const addResults = useMemo(() => {
+    if (!draft) return [];
+    const have = new Set(draft.ids.map((x) => x.toLowerCase()));
+    const q = addQuery.trim().toLowerCase();
+    return (data?.candidates ?? [])
+      .filter((c) => !have.has(c.id.toLowerCase()) && (!q || c.title.toLowerCase().includes(q) || c.id.toLowerCase().includes(q)))
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .slice(0, 30);
+  }, [draft, addQuery, data]);
+
+  function moveDraft(i: number, d: number) {
+    if (!draft) return;
+    const ids = [...draft.ids];
+    const j = i + d;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setDraft({ ...draft, ids });
+  }
+
+  function saveDraft(l: Loadout) {
+    if (!draft) return;
+    const ids = draft.ids;
+    void run(() => window.modHub.editLoadout(gameId, l.id, ids)).then(() => {
+      setDraft(null);
+      setAddQuery('');
+    });
+  }
   const game = GAMES.find((g) => g.id === gameId)!;
 
   async function run(action: () => Promise<{ ok: boolean; message: string }>) {
@@ -171,7 +206,7 @@ The old version is backed up first.`,
             </button>
           ))}
         </div>
-        {data?.managedBy !== 'mo2' && (
+        {data && (
           <form
             className="loadouts-save"
             onSubmit={(e) => {
@@ -181,12 +216,12 @@ The old version is backed up first.`,
           >
             <input
               type="text"
-              placeholder={`Name for the current ${game.name} setup…`}
+              placeholder={isMo2 ? 'Name for a copy of the ▶ Play profile…' : `Name for the current ${game.name} setup…`}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
             <button type="submit" className="btn btn-primary" disabled={busy || !newName.trim()}>
-              Save as new ({data?.current.length ?? 0} enabled)
+              {isMo2 ? 'Copy profile' : `Save as new (${data?.current.length ?? 0} enabled)`}
             </button>
           </form>
         )}
@@ -225,7 +260,14 @@ The old version is backed up first.`,
                   <span className="loadout-kind">{l.kindLabel}</span>
                 </div>
                 <div className="loadout-meta">
-                  <span>{l.count} mods</span>
+                  <span>
+                    {l.count} mods
+                    {data.alwaysOn ? (
+                      <span className="muted" title="Vortex-deployed mods without a plugin (SKSE DLLs, assets) load in every profile, so lists don't count them.">
+                        {' '}+ {data.alwaysOn} always on (Vortex)
+                      </span>
+                    ) : null}
+                  </span>
                   {l.isCurrent ? (
                     <span>matches what's enabled now</span>
                   ) : (
@@ -246,6 +288,21 @@ The old version is backed up first.`,
                 <button type="button" className="btn btn-sm" onClick={() => setOpen(open === l.id ? null : l.id)}>
                   {open === l.id ? 'Hide mods' : 'Show mods'}
                 </button>
+                {canEdit(l) && (
+                  <button
+                    type="button"
+                    className={`btn btn-sm${draft?.id === l.id ? ' btn-active' : ''}`}
+                    disabled={busy}
+                    title="Add, remove or reorder mods in this list"
+                    onClick={() => {
+                      setOpen(l.id);
+                      setAddQuery('');
+                      setDraft(draft?.id === l.id ? null : { id: l.id, ids: [...l.ids] });
+                    }}
+                  >
+                    {draft?.id === l.id ? 'Stop editing' : 'Edit'}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
@@ -294,14 +351,73 @@ The old version is backed up first.`,
                   </button>
                 )}
               </div>
-              {open === l.id && (
+              {open === l.id && draft?.id === l.id && (
+                <div className="loadout-editor">
+                  <ol className="loadout-mods">
+                    {draft.ids.map((id, i) => (
+                      <li key={id} className={l.missing.includes(id) ? 'missing' : 'on'} title={id}>
+                        <span className="loadout-edit-name">{label(id)}</span>
+                        {!isMo2 && (
+                          <>
+                            <button type="button" className="btn btn-xs" title="Load earlier" disabled={i === 0} onClick={() => moveDraft(i, -1)}>
+                              ↑
+                            </button>
+                            <button type="button" className="btn btn-xs" title="Load later" disabled={i === draft.ids.length - 1} onClick={() => moveDraft(i, 1)}>
+                              ↓
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          title={isMo2 ? 'Switch off in this profile' : 'Remove from this list'}
+                          onClick={() => setDraft({ ...draft, ids: draft.ids.filter((x) => x !== id) })}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="loadout-add">
+                    <input
+                      type="search"
+                      placeholder={`Search installed ${game.name} mods to add…`}
+                      value={addQuery}
+                      onChange={(e) => setAddQuery(e.target.value)}
+                    />
+                    <ul className="loadout-add-results">
+                      {addResults.map((c) => (
+                        <li key={c.id}>
+                          <button type="button" className="btn btn-xs" onClick={() => setDraft({ ...draft, ids: [...draft.ids, c.id] })}>
+                            + Add
+                          </button>{' '}
+                          {c.title}
+                        </li>
+                      ))}
+                      {addResults.length === 0 && <li className="muted">Nothing else to add{addQuery ? ' for that search' : ''}.</li>}
+                    </ul>
+                  </div>
+                  <div className="loadout-edit-actions">
+                    <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => saveDraft(l)}>
+                      Save changes ({draft.ids.length} mods)
+                    </button>
+                    <button type="button" className="btn btn-sm" onClick={() => setDraft(null)}>
+                      Cancel
+                    </button>
+                    <span className="muted">
+                      {isMo2 ? 'Writes the MO2 profile (MO2 must be closed; backed up first).' : 'Saved to the list file (backed up first). Apply it to use it.'}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {open === l.id && draft?.id !== l.id && (
                 <ol className="loadout-mods">
                   {l.ids.map((id) => {
                     const missing = l.missing.includes(id);
                     const on = data.current.some((c) => c.toLowerCase() === id.toLowerCase());
                     return (
                       <li key={id} className={missing ? 'missing' : on ? 'on' : 'off'} title={id}>
-                        {nameFor(index, gameId, id)}
+                        {label(id)}
                         {missing ? ' — not installed' : on ? '' : ' — currently off'}
                       </li>
                     );

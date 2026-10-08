@@ -6,11 +6,13 @@ import type { ModRecord } from '../shared/types';
 /** A throwaway "home" folder; USERPROFILE/HOME/APPDATA point at it so code under test never touches real files. */
 export function tempHome(): { home: string; restore: () => void } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'modhub-test-'));
-  const saved = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, APPDATA: process.env.APPDATA };
+  const saved = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, APPDATA: process.env.APPDATA, LOCALAPPDATA: process.env.LOCALAPPDATA };
   process.env.USERPROFILE = home;
   process.env.HOME = home;
   process.env.APPDATA = path.join(home, 'AppData', 'Roaming');
+  process.env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
   fs.mkdirSync(process.env.APPDATA, { recursive: true });
+  fs.mkdirSync(process.env.LOCALAPPDATA, { recursive: true });
   return {
     home,
     restore: () => {
