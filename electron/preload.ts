@@ -33,6 +33,11 @@ const modHub: IpcApi = {
     ipcRenderer.on('modhub:bulk-progress', listener);
     return () => ipcRenderer.removeListener('modhub:bulk-progress', listener);
   },
+  onToast: (handler: (t: { message: string; kind?: 'ok' | 'error' | 'info' }) => void) => {
+    const listener = (_e: unknown, t: { message: string; kind?: 'ok' | 'error' | 'info' }) => handler(t);
+    ipcRenderer.on('modhub:toast', listener);
+    return () => ipcRenderer.removeListener('modhub:toast', listener);
+  },
   onCatalogUpdated: (handler: () => void) => {
     const listener = () => handler();
     ipcRenderer.on('modhub:catalog-updated', listener);
@@ -45,6 +50,11 @@ const modHub: IpcApi = {
   getLoadOrders: () => ipcRenderer.invoke('modhub:getLoadOrders'),
   getIsaacConflicts: () => ipcRenderer.invoke('modhub:getIsaacConflicts'),
   getPlayInfo: (gameId: string) => ipcRenderer.invoke('modhub:getPlayInfo', gameId),
+  checkModSecurity: (modId: string) => ipcRenderer.invoke('modhub:checkModSecurity', modId),
+  getSecurityReport: (modId: string) => ipcRenderer.invoke('modhub:getSecurityReport', modId),
+  getSecurityOverview: () => ipcRenderer.invoke('modhub:getSecurityOverview'),
+  checkAllExecutableMods: () => ipcRenderer.invoke('modhub:checkAllExecutableMods'),
+  openVirusTotal: (hash: string) => ipcRenderer.invoke('modhub:openVirusTotal', hash),
   getSteamUpdates: (appIds: number[]) => ipcRenderer.invoke('modhub:getSteamUpdates', appIds),
   setIsaacFolderEnabled: (folder: string, enabled: boolean) => ipcRenderer.invoke('modhub:setIsaacFolderEnabled', folder, enabled),
   playGame: (gameId: string, optionId: string, profile?: string) => ipcRenderer.invoke('modhub:playGame', gameId, optionId, profile),

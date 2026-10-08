@@ -204,6 +204,11 @@ export interface HubSettings {
   reuploadSearchEnabled?: boolean;
   nexusUpdateChecksEnabled?: boolean;
   nexusUpdateIntervalHours?: number;
+  /** Malware checks: VirusTotal key (hash lookups only, never uploads), automatic checks of new/changed mods. */
+  virusTotalApiKey?: string;
+  securityAutoCheck?: boolean;
+  /** Mods installed before this date aren't auto-scanned (set when checks were first enabled). */
+  securityBaseline?: string;
   /** Play: last launch method (and MO2 profile) per game. */
   playChoices?: Record<string, { optionId: string; profile?: string }>;
   /** Default game filter for All mods / Steam (all | game id). */
@@ -215,6 +220,35 @@ export interface HubSettings {
   dismissedMods?: string[];
   /** Game ids hidden from all mod lists (undefined = defaults). */
   hiddenGames?: string[];
+}
+
+export interface SecurityDefender {
+  status: 'clean' | 'threat' | 'unavailable' | 'skipped';
+  detail?: string;
+}
+
+export interface SecurityVirusTotal {
+  status: 'clean' | 'flagged' | 'unknown' | 'no-key' | 'error' | 'skipped';
+  malicious?: number;
+  suspicious?: number;
+  engines?: number;
+  detail?: string;
+}
+
+/** clean / review (1–2 engines flag it) / flagged (3+) / threat (Defender) / unavailable / unchecked. */
+export type SecurityStatus = 'clean' | 'review' | 'flagged' | 'threat' | 'unavailable' | 'unchecked';
+
+export interface ModSecurityReport {
+  modId: string;
+  checkedAt: string;
+  defender: SecurityDefender;
+  /** The mod's download archive (Vortex/Nexus zip), when it's on disk. */
+  archive?: { path: string; sha256: string; virusTotal: SecurityVirusTotal };
+  /** Programs, DLL/ASI plugins and Windows scripts inside the mod (first 25). */
+  executables: { rel: string; size: number; sha256: string; virusTotal: SecurityVirusTotal }[];
+  executableCount: number;
+  signature: string;
+  status: SecurityStatus;
 }
 
 /** One way to start a game (best first). */
@@ -440,6 +474,7 @@ export type IpcApi = {
   workshopBulkKeep: (modIds: string[]) => Promise<{ ok: boolean; message: string; kept: number; failed: number }>;
   onBulkProgress: (handler: (p: { done: number; total: number; current: string; phase: string }) => void) => () => void;
   onCatalogUpdated: (handler: () => void) => () => void;
+  onToast: (handler: (t: { message: string; kind?: 'ok' | 'error' | 'info' }) => void) => () => void;
   checkWorkshopUpdates: (gameSteamAppId?: number) => Promise<ModRecord[]>;
   getThumbnail: (filePath: string) => Promise<string | null>;
   /** Read-only: each supported game's enabled mods and load order (RimWorld, Project Zomboid, Isaac). */
@@ -448,6 +483,14 @@ export type IpcApi = {
   getIsaacConflicts: () => Promise<IsaacConflicts>;
   /** Launch options + pre-launch checks for a game. */
   getPlayInfo: (gameId: string) => Promise<PlayInfo>;
+  /** Malware check of one mod (Defender + VirusTotal hash lookups). */
+  checkModSecurity: (modId: string) => Promise<ModSecurityReport | { error: string }>;
+  getSecurityReport: (modId: string) => Promise<ModSecurityReport | null>;
+  /** Per mod: last status, executable count, whether files changed since. */
+  getSecurityOverview: () => Promise<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>>;
+  /** Check every mod that contains programs/DLLs/scripts (background; progress via toasts). */
+  checkAllExecutableMods: () => Promise<{ ok: boolean; message: string }>;
+  openVirusTotal: (sha256: string) => Promise<void>;
   /** Installed Steam games with an update waiting (appId -> download size). */
   getSteamUpdates: (appIds: number[]) => Promise<Record<number, { bytes?: number }>>;
   /** Isaac: add/remove disable.it for one mods folder (game must be closed). */

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { GameRecord, ModRecord } from '@shared/types';
+import type { GameRecord, ModRecord, ModSecurityReport } from '@shared/types';
 import { plainModDescription } from '@shared/plainDescription';
 import { deployedDiskPath } from '@shared/modDiskPath';
 import { formatBytes, formatFullDate, sourceLabel } from '../utils/format';
@@ -13,6 +13,108 @@ import { openModDetails } from '../utils/modDetails';
 import { ratingTitle, workshopRating } from '../utils/workshopRating';
 
 type Changes = Awaited<ReturnType<NonNullable<Window['modHub']>['getModChanges']>>;
+
+/** Malware check: Defender on the mod's files/archive + VirusTotal hash lookups (never uploads). */
+function SecuritySection({ mod }: { mod: ModRecord }) {
+  const [report, setReport] = useState<ModSecurityReport | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void window.modHub?.getSecurityReport?.(mod.id).then((r) => {
+      if (!cancelled) setReport(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mod.id]);
+
+  async function run() {
+    if (!window.modHub) return;
+    setBusy(true);
+    try {
+      const r = await window.modHub.checkModSecurity(mod.id);
+      if ('error' in r) toast(r.error, 'error');
+      else {
+        setReport(r);
+        toast(r.status === 'clean' ? 'Malware check: clean.' : `Malware check: ${r.status}.`, r.status === 'clean' ? 'ok' : 'error');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const vtText = (v: ModSecurityReport['executables'][number]['virusTotal']) =>
+    v.status === 'clean'
+      ? `VirusTotal 0/${v.engines}`
+      : v.status === 'flagged'
+        ? `VirusTotal ${v.malicious}/${v.engines}${v.suspicious ? ` (+${v.suspicious} suspicious)` : ''}`
+        : v.status === 'unknown'
+          ? 'VirusTotal: never seen'
+          : v.status === 'no-key'
+            ? 'VirusTotal: add a key in Settings'
+            : v.status === 'skipped'
+              ? 'VirusTotal: skipped'
+              : `VirusTotal: ${v.detail ?? 'error'}`;
+
+  return (
+    <section className="detail-cross">
+      <h3>Malware check</h3>
+      {report === undefined ? (
+        <p className="detail-muted">…</p>
+      ) : !report ? (
+        <p className="detail-muted">Not checked yet.</p>
+      ) : (
+        <>
+          <p className={`sec-summary sec-${report.status}`}>
+            {report.status === 'threat'
+              ? '⛔ Microsoft Defender found a threat (it handles quarantine). Check Windows Security.'
+              : report.status === 'flagged'
+                ? '⚠ Several VirusTotal engines flag files in this mod.'
+                : report.status === 'review'
+                  ? '⚠ One or two VirusTotal engines flag a file. Often a false positive for DLL plugins, but worth a look.'
+                  : report.status === 'unavailable'
+                    ? 'Defender could not scan (switched off?). Malwarebytes real-time protection still checks files as they are written.'
+                    : '✓ No threats found.'}{' '}
+            <span className="detail-muted">Checked {new Date(report.checkedAt).toLocaleString()}</span>
+          </p>
+          <ul className="sec-files">
+            <li>
+              Defender: {report.defender.status}
+              {report.defender.detail && report.defender.status !== 'clean' ? ` (${report.defender.detail.slice(0, 160)})` : ''}
+            </li>
+            {report.archive && (
+              <li>
+                Download archive: {vtText(report.archive.virusTotal)}{' '}
+                <button type="button" className="btn btn-xs" onClick={() => void window.modHub?.openVirusTotal(report.archive!.sha256)}>
+                  Open on VirusTotal
+                </button>
+              </li>
+            )}
+            {report.executables.map((e) => (
+              <li key={e.rel}>
+                <code>{e.rel}</code> · {vtText(e.virusTotal)}{' '}
+                <button type="button" className="btn btn-xs" onClick={() => void window.modHub?.openVirusTotal(e.sha256)}>
+                  Open on VirusTotal
+                </button>
+              </li>
+            ))}
+            {report.executableCount > report.executables.length && (
+              <li className="detail-muted">…and {report.executableCount - report.executables.length} more program/DLL files</li>
+            )}
+            {report.executableCount === 0 && <li className="detail-muted">No programs, DLLs or scripts in this mod.</li>}
+          </ul>
+        </>
+      )}
+      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run()}>
+        {busy ? 'Checking… (VirusTotal: 4 lookups/min)' : report ? 'Check again' : 'Check for malware'}
+      </button>
+      <p className="detail-muted">
+        Files are never uploaded: only their SHA-256 fingerprints are looked up. “Open on VirusTotal” lets you upload by
+        hand if you choose.
+      </p>
+    </section>
+  );
+}
 
 /** Removed Workshop mod: same-title items on the Workshop. Suggestions only; subscribing needs your click. */
 function ReuploadSection({ mod }: { mod: ModRecord }) {
@@ -545,6 +647,7 @@ export function ModDetailPanel({ mod, games, allMods, onClose }: Props) {
 
         <ChangesSection mod={mod} />
         <HistorySection mod={mod} />
+        <SecuritySection mod={mod} />
         <ReuploadSection mod={mod} />
         <CrossPlatformSection mod={mod} all={allMods} />
 

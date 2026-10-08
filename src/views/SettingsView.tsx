@@ -10,6 +10,7 @@ type Props = {
 export function SettingsView({ catalog, onSaved }: Props) {
   const [settings, setSettings] = useState<HubSettings | null>(null);
   const [nexusKey, setNexusKey] = useState('');
+  const [vtKey, setVtKey] = useState('');
   const [message, setMessage] = useState('');
 
   async function saveBg(partial: Partial<HubSettings>) {
@@ -22,6 +23,7 @@ export function SettingsView({ catalog, onSaved }: Props) {
     window.modHub?.getSettings().then((s) => {
       setSettings(s);
       setNexusKey(s.nexusApiKey ?? '');
+      setVtKey(s.virusTotalApiKey ?? '');
     });
   }, []);
 
@@ -118,6 +120,41 @@ export function SettingsView({ catalog, onSaved }: Props) {
             ))}
           </select>
         </label>
+
+        <h2>Malware checks</h2>
+        <p className="message message-compact settings-centered-note">
+          New or changed mods are scanned with Microsoft Defender (it works on demand even when Malwarebytes is your main
+          antivirus). Programs and DLLs are also looked up on VirusTotal <strong>by fingerprint only, never uploaded</strong>.
+          Malwarebytes has no command-line scanner; its real-time protection covers files as they are written.
+        </p>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.securityAutoCheck !== false}
+            onChange={(e) => void saveBg({ securityAutoCheck: e.target.checked })}
+          />
+          Check new and changed mods automatically (after scans)
+        </label>
+        <label>
+          VirusTotal API key (free at virustotal.com → profile → API key; 4 lookups/min)
+          <input
+            type="password"
+            value={vtKey}
+            placeholder="optional"
+            onChange={(e) => setVtKey(e.target.value)}
+            onBlur={() => void saveBg({ virusTotalApiKey: vtKey.trim() || undefined })}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn"
+          onClick={async () => {
+            const r = await window.modHub?.checkAllExecutableMods();
+            if (r) setMessage(r.message);
+          }}
+        >
+          Check all mods with programs/DLLs now
+        </button>
 
         <h2>Accounts</h2>
         <p className="message message-compact settings-centered-note">

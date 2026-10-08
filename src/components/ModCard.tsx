@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord } from '@shared/types';
+import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord, SecurityStatus } from '@shared/types';
 import { plainModDescription } from '@shared/plainDescription';
 import { bestPreviewFilePath, deployedDiskPath } from '@shared/modDiskPath';
 import { ModThumbnail } from './ModThumbnail';
@@ -21,6 +21,8 @@ type Props = {
   onToggleEnabled?: (mod: ModRecord, enabled: boolean) => void;
   /** Isaac: resource files this mod wins/loses against other enabled mods. */
   conflict?: IsaacConflicts['perMod'][string];
+  /** Malware-check overview for this mod. */
+  security?: { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string };
   games: GameRecord[];
   variant?: 'steam' | 'nexus' | 'library';
   trackedNexus?: Set<string>;
@@ -46,6 +48,7 @@ export const ModCard = memo(function ModCard({
   loadState,
   onToggleEnabled,
   conflict,
+  security,
   games,
   variant = 'library',
   trackedNexus,
@@ -163,6 +166,29 @@ export const ModCard = memo(function ModCard({
               <span className="nexus-endorse">♥ {compactNumber(mod.nexusEndorsements)}</span>
               {mod.nexusDownloads != null && <span className="mod-card-votes">⬇ {compactNumber(mod.nexusDownloads)}</span>}
             </span>
+          )}
+          {security && (security.executables > 0 || (security.status !== 'unchecked' && security.status !== 'clean')) && (
+            <button
+              type="button"
+              className={`status-pill sec-pill sec-${security.status}${security.stale ? ' sec-stale' : ''}`}
+              title={`${security.executables} program/DLL/script file(s) in this mod. ${
+                security.status === 'unchecked'
+                  ? 'Not checked for malware yet.'
+                  : `Last malware check: ${security.status}${security.stale ? ' (files changed since)' : ''}.`
+              } Click for details.`}
+              onClick={() => openModDetails(mod)}
+            >
+              {security.status === 'threat'
+                ? '⛔ Defender found a threat'
+                : security.status === 'flagged'
+                  ? '⚠ VirusTotal flags this mod'
+                  : security.status === 'review'
+                    ? '⚠ 1–2 VirusTotal engines flag it'
+                    : security.status === 'clean'
+                      ? `✓ ${security.executables} exe/DLL checked clean`
+                      : `${security.executables} exe/DLL · not checked`}
+              {security.stale ? ' · changed' : ''}
+            </button>
           )}
           {conflict && conflict.losses > 0 && (
             <span

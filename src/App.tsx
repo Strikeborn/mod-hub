@@ -1,5 +1,15 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { CatalogSnapshot, GameLoadOrder, IsaacConflicts, ModLoadState, ModRecord, OrderPlan, ScanProgressEvent, ViewMode } from '@shared/types';
+import type {
+  CatalogSnapshot,
+  GameLoadOrder,
+  IsaacConflicts,
+  ModLoadState,
+  ModRecord,
+  OrderPlan,
+  ScanProgressEvent,
+  SecurityStatus,
+  ViewMode,
+} from '@shared/types';
 import { isNexusLikeSource } from './utils/games';
 import { prefetchModThumbnails } from './utils/prefetchThumbnails';
 import { Sidebar } from './components/Sidebar';
@@ -192,6 +202,13 @@ function AppInner() {
   }, [reload]);
 
   useEffect(() => window.modHub?.onCatalogUpdated?.(() => void reload()), [reload]);
+  useEffect(() => window.modHub?.onToast?.((t) => toast(t.message, t.kind)), []);
+
+  // Malware-check overview (executables per mod + last result), refreshed with the catalog.
+  const [security, setSecurity] = useState<Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>>({});
+  useEffect(() => {
+    void window.modHub?.getSecurityOverview?.().then(setSecurity);
+  }, [catalog]);
 
   useEffect(() => {
     void refreshTrackedNexus();
@@ -922,6 +939,7 @@ function AppInner() {
               onReorder={orderGame && sortMode === 'load-order' ? onReorder : undefined}
               orderSortActive={Boolean(activeLoadOrder) && sortMode === 'load-order'}
               conflicts={isaacConflicts?.perMod}
+              security={security}
               onOrderSort={activeLoadOrder ? (on) => setSortMode(on ? 'load-order' : 'title') : undefined}
               loadStates={loadStates}
               onToggleEnabled={onToggleEnabled}

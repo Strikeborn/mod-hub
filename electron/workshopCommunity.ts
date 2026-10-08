@@ -89,6 +89,13 @@ function cleanName(n: string | undefined): string | undefined {
 const RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Anti-cheat (VAC / EAC) games: never start a Steam session as one of these in the background. VAC runs inside
+ * the game's own process, so a helper session isn't scanned by it, but there's no reason to take the chance or to
+ * show you as "in game" there. Subscribe/unsubscribe for these still use the game's id (you clicked it).
+ */
+export const ANTI_CHEAT_APPS = new Set([730, 440, 570, 4000, 252490, 10, 240, 1172470, 359550, 578080]);
+
+/**
  * For mods Steam reports as removed/hidden: search the Workshop by title and keep close matches, marking whether
  * the uploader is the original author. Only suggestions; nothing is subscribed. Returns rows updated.
  */
@@ -107,6 +114,10 @@ export async function findWorkshopReuploads(mods: ModRecord[], helperPath: strin
   let changed = 0;
   for (const m of targets.slice(0, 25)) {
     const appId = m.steamAppId ?? m.keptFromWorkshop!.appId;
+    if (ANTI_CHEAT_APPS.has(appId)) {
+      m.reuploadCheckedAt = new Date().toISOString();
+      continue;
+    }
     const e = archive[m.workshopId!];
     const title = e?.title ?? m.title;
     if (/^\d+$/.test(title.trim())) {

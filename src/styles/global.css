@@ -2048,3 +2048,41 @@ button.reupload-pill {
 .loadouts-import {
   margin: 0 0 0.8rem;
 }
+
+/* Malware checks */
+button.sec-pill {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.sec-pill.sec-clean {
+  border-color: rgba(110, 200, 140, 0.45);
+  color: #9fdcb2;
+}
+
+.sec-pill.sec-threat,
+.sec-pill.sec-flagged,
+.sec-summary.sec-threat,
+.sec-summary.sec-flagged {
+  border-color: rgba(240, 110, 100, 0.7);
+  color: #f08a7a;
+}
+
+.sec-pill.sec-review,
+.sec-summary.sec-review,
+.sec-pill.sec-stale {
+  color: #f0b45a;
+}
+
+.sec-files {
+  margin: 0.3rem 0 0.5rem 1rem;
+  padding: 0;
+  font-size: 0.78rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sec-files code {
+  font-size: 0.74rem;
+}

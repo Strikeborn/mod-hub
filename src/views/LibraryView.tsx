@@ -1,4 +1,4 @@
-import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord, ViewMode } from '@shared/types';
+import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord, SecurityStatus, ViewMode } from '@shared/types';
 import { ModCollectionView } from '../components/ModCollectionView';
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   orderSortActive?: boolean;
   /** Isaac file conflicts per catalog mod id. */
   conflicts?: IsaacConflicts['perMod'];
+  /** Malware-check overview per mod id. */
+  security?: Record<string, { status: SecurityStatus; executables: number; stale: boolean; checkedAt?: string }>;
   onOrderSort?: (active: boolean) => void;
   mods: ModRecord[];
   games: GameRecord[];
@@ -24,6 +26,7 @@ export function LibraryView({
   onReorder,
   orderSortActive,
   conflicts,
+  security,
   onOrderSort,
   loadStates,
   onToggleEnabled,
@@ -43,6 +46,7 @@ export function LibraryView({
       onReorder={onReorder}
       orderSortActive={orderSortActive}
       conflicts={conflicts}
+      security={security}
       onOrderSort={onOrderSort}
       onToggleEnabled={onToggleEnabled}
       mods={mods}

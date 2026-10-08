@@ -13,6 +13,7 @@ import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
 import { planPzOrder } from './pzDeps';
+import { backgroundSecurityPass, checkMod, initSecurityStore, securityOverview, securityReport } from './modSecurity';
 import { findMo2Instances, launchPlayOption, playOptions, steamUpdateState } from './playPaths';
 import { analyzeIsaacConflicts } from './isaacConflicts';
 import { applyWorkshopArchive } from './workshopArchive';
@@ -255,6 +256,7 @@ app.whenReady().then(() => {
   registerInjectionProtocol('persist:modhub-nexus-injected');
   registerInjectionProtocol('');
   store = new CatalogStore(app.getPath('userData'));
+  initSecurityStore(app.getPath('userData'));
   registerIpc();
   createWindow();
   app.on('activate', () => {
@@ -333,6 +335,7 @@ function registerIpc() {
     store.mergeScanResults(mods, report);
     setTimeout(() => void workshopCommunityRefresh(true), 2000);
     setTimeout(() => void nexusUpdateCheck(true), 1000);
+    setTimeout(() => void securityPass(), 20000);
     // Same dedupe/correlation pass as startup, so a scan never shows rows that vanish after a restart.
     return loadCatalogForWindow();
   });
@@ -345,6 +348,7 @@ function registerIpc() {
         setTimeout(() => void backgroundNexusFill(), 3000);
         setTimeout(() => void workshopCommunityRefresh(false), 15000);
         setTimeout(() => void nexusUpdateCheck(false), 6000);
+        setTimeout(() => void securityPass(), 45000);
       });
     }
     return catalogLoading;
@@ -576,6 +580,50 @@ function registerIpc() {
       if (s?.pending) out[id] = { bytes: s.bytes };
     }
     return out;
+  });
+
+  // Malware checks: new/changed mods in the background, one mod or all-with-executables on request.
+  let securityRunning = false;
+  const securityPass = async (all = false) => {
+    if (securityRunning) return;
+    const settings = store.loadSettings();
+    if (!all && settings.securityAutoCheck === false) return;
+    if (!settings.securityBaseline) store.saveSettings({ securityBaseline: new Date().toISOString() });
+    securityRunning = true;
+    try {
+      const mods = store.loadCatalog().mods;
+      const baseline = all ? '' : (store.loadSettings().securityBaseline ?? new Date().toISOString());
+      const r = await backgroundSecurityPass(mods, settings.virusTotalApiKey, baseline);
+      console.log(`[Mod Hub] Malware checks: ${r.inventoried} inventories refreshed, ${r.checked} mod(s) checked, ${r.threats} with findings`);
+      if (r.checked || r.inventoried) mainWindow?.webContents.send('modhub:catalog-updated');
+      if (r.threats) {
+        mainWindow?.webContents.send('modhub:toast', {
+          message: `Malware check: ${r.threats} mod(s) flagged. Open them for details.`,
+          kind: 'error',
+        });
+      }
+    } catch (e) {
+      console.warn('[Mod Hub] malware check pass failed:', e);
+    } finally {
+      securityRunning = false;
+    }
+  };
+
+  ipcMain.handle('modhub:checkModSecurity', async (_e, modId: string) => {
+    const m = store.loadCatalog().mods.find((x) => x.id === modId);
+    if (!m) return { error: 'Mod not found.' };
+    return checkMod(m, store.loadSettings().virusTotalApiKey);
+  });
+  ipcMain.handle('modhub:getSecurityReport', (_e, modId: string) => securityReport(modId) ?? null);
+  ipcMain.handle('modhub:getSecurityOverview', () => securityOverview());
+  ipcMain.handle('modhub:checkAllExecutableMods', () => {
+    if (securityRunning) return { ok: false, message: 'A malware check is already running.' };
+    void securityPass(true);
+    return { ok: true, message: 'Checking every mod that contains programs, DLLs or scripts in the background…' };
+  });
+  ipcMain.handle('modhub:openVirusTotal', (_e, hash: string) => {
+    if (!/^[0-9a-f]{64}$/i.test(hash)) return;
+    return shell.openExternal(`https://www.virustotal.com/gui/file/${hash}`);
   });
 
   ipcMain.handle('modhub:getPlayInfo', (_e, gameId: string) => {
