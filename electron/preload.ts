@@ -75,6 +75,7 @@ const modHub: IpcApi = {
   openSortTool: (gameId: string) => ipcRenderer.invoke('modhub:openSortTool', gameId),
   pluginSync: (gameId: string, direction: string, apply: boolean) => ipcRenderer.invoke('modhub:pluginSync', gameId, direction, apply),
   getCrashReport: (gameId: string) => ipcRenderer.invoke('modhub:getCrashReport', gameId),
+  vortexToMo2: (gameId: string, apply: boolean) => ipcRenderer.invoke('modhub:vortexToMo2', gameId, apply),
   applyLoadout: (gameId: string, loadoutId: string) => ipcRenderer.invoke('modhub:applyLoadout', gameId, loadoutId),
   saveLoadout: (gameId: string, name: string) => ipcRenderer.invoke('modhub:saveLoadout', gameId, name),
   deleteLoadout: (gameId: string, loadoutId: string) => ipcRenderer.invoke('modhub:deleteLoadout', gameId, loadoutId),

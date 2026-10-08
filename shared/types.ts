@@ -573,6 +573,16 @@ export type IpcApi = {
     apply: boolean,
   ) => Promise<{ ok: boolean; message: string; changed: number; differences: { name: string; vortex: boolean; mo2: boolean }[] }>;
   getCrashReport: (gameId: string) => Promise<CrashReport | null>;
+  /** Copy the mods Vortex deploys into MO2 (apply=false: preview only). */
+  vortexToMo2: (
+    gameId: string,
+    apply: boolean,
+  ) => Promise<{
+    ok: boolean;
+    message: string;
+    profile?: string;
+    items: { title: string; bytes: number; files: number; status: 'copy' | 'exists' | 'root-files' }[];
+  }>;
   applyLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;
   saveLoadout: (gameId: string, name: string) => Promise<{ ok: boolean; message: string }>;
   deleteLoadout: (gameId: string, loadoutId: string) => Promise<{ ok: boolean; message: string }>;

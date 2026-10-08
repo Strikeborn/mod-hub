@@ -11,7 +11,7 @@ import {
 
 type ManifestFile = { relPath?: string; source?: string; target?: string };
 
-type Manifest = {
+export type Manifest = {
   gameId?: string;
   stagingPath?: string;
   targetPath?: string;
@@ -40,8 +40,8 @@ export function emptyDeploymentIndex(): VortexDeploymentIndex {
   return { byDeployedPath: new Map(), byBaseName: new Map(), manifests: 0, entries: 0 };
 }
 
-function readManifest(stagingPath: string): Manifest | undefined {
-  const packed = path.join(stagingPath, 'vortex.deployment.msgpack');
+export function readManifest(stagingPath: string, kind = ''): Manifest | undefined {
+  const packed = path.join(stagingPath, `vortex.deployment${kind ? `.${kind}` : ''}.msgpack`);
   if (fs.existsSync(packed)) {
     try {
       return decodeMsgpack(fs.readFileSync(packed)) as Manifest;
@@ -49,7 +49,7 @@ function readManifest(stagingPath: string): Manifest | undefined {
       /* fall through to json */
     }
   }
-  const json = path.join(stagingPath, 'vortex.deployment.json');
+  const json = path.join(stagingPath, `vortex.deployment${kind ? `.${kind}` : ''}.json`);
   if (fs.existsSync(json)) {
     try {
       return JSON.parse(fs.readFileSync(json, 'utf8')) as Manifest;

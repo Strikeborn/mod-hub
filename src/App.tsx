@@ -428,6 +428,34 @@ function AppInner() {
     if (r.ok) await refreshLoadOrders();
   };
 
+  const copyVortexToMo2 = async () => {
+    if (!pluginGame) return;
+    const plan = await window.modHub.vortexToMo2(pluginGame, false);
+    const todo = plan.items.filter((i) => i.status === 'copy');
+    if (!plan.ok || todo.length === 0) {
+      toast(plan.ok ? 'Nothing to copy: every Vortex mod is already in MO2.' : plan.message, plan.ok ? 'info' : 'error');
+      return;
+    }
+    const mb = (b: number) => `${(b / 1e6).toFixed(b < 1e7 ? 1 : 0)} MB`;
+    const total = todo.reduce((a, i) => a + i.bytes, 0);
+    const lines = todo.map((i) => `• ${i.title} (${mb(i.bytes)})`).join('\n');
+    const skipped = plan.items.filter((i) => i.status !== 'copy');
+    const skipNote = skipped.length
+      ? `\n\nNot copied:\n${skipped.map((i) => `• ${i.title}: ${i.status === 'exists' ? 'already in MO2' : "game-root files (MO2 needs Root Builder); stays in Vortex"}`).join('\n')}`
+      : '';
+    if (
+      !window.confirm(
+        `Copy ${todo.length} Vortex mod(s) into Mod Organizer 2 (${mb(total)})?\n\n${lines}${skipNote}\n\nThey're switched on in “${plan.profile}” and off in other profiles. Vortex isn't changed: after checking the game through MO2, purge Skyrim in Vortex. MO2 must be closed.`,
+      )
+    ) {
+      return;
+    }
+    toast('Copying mods into MO2…', 'info');
+    const r = await window.modHub.vortexToMo2(pluginGame, true);
+    toast(r.message, r.ok ? 'ok' : 'error');
+    if (r.ok) await refreshLoadOrders();
+  };
+
   // Isaac: mods replacing the same resource files (re-read whenever the enabled state changes).
   const [isaacConflicts, setIsaacConflicts] = useState<IsaacConflicts | null>(null);
   const [showConflicts, setShowConflicts] = useState(false);
@@ -828,6 +856,14 @@ function AppInner() {
                             onClick={() => void syncPlugins('mo2-to-vortex')}
                           >
                             MO2 → Vortex
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            title="Copy the mods Vortex deploys into MO2 so MO2 profiles control everything (preview first; Vortex is left as it is)"
+                            onClick={() => void copyVortexToMo2()}
+                          >
+                            Copy Vortex mods into MO2…
                           </button>
                         </>
                       )}
