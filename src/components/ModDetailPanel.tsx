@@ -185,7 +185,7 @@ function ChangesSection({ mod }: { mod: ModRecord }) {
     };
   }, [mod.id]);
 
-  if (!mod.workshopId && !mod.nexusModId) return null;
+  if (!mod.workshopId && !mod.nexusModId && !mod.prism?.modrinthId) return null;
   const newOnes = changes?.entries.filter((e) => e.isNew) ?? [];
   const canUpdate = Boolean(mod.workshopId && mod.revision.updateAvailable);
   const visible = changes ? (showAll ? changes.entries : changes.entries.slice(0, Math.max(5, newOnes.length))) : [];

@@ -482,7 +482,7 @@ export type IpcApi = {
   ) => Promise<{ images: { src: string; local: boolean }[]; videos: string[]; description?: string; errors: string[] }>;
   openInSteam: (url: string) => Promise<void>;
   getModChanges: (modId: string) => Promise<{
-    source: 'workshop' | 'nexus' | 'none';
+    source: 'workshop' | 'nexus' | 'modrinth' | 'none';
     installed: { when?: string; version?: string };
     latest: { when?: string; version?: string };
     entries: { when?: string; version?: string; notes: string; isNew: boolean }[];

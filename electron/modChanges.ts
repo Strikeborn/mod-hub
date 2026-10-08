@@ -11,7 +11,7 @@ export type ChangeEntry = {
 };
 
 export type ModChanges = {
-  source: 'workshop' | 'nexus' | 'none';
+  source: 'workshop' | 'nexus' | 'modrinth' | 'none';
   installed: { when?: string; version?: string };
   latest: { when?: string; version?: string };
   entries: ChangeEntry[];
@@ -93,12 +93,40 @@ async function nexusChanges(mod: ModRecord, apiKey: string): Promise<ModChanges>
   };
 }
 
+/** Modrinth: versions for this loader + Minecraft version, newest first, with their changelogs. */
+async function modrinthChanges(mod: ModRecord): Promise<ModChanges> {
+  const p = mod.prism!;
+  const q = new URLSearchParams();
+  if (p.loader) q.set('loaders', JSON.stringify([p.loader]));
+  if (p.mcVersion) q.set('game_versions', JSON.stringify([p.mcVersion]));
+  const res = await fetch(`https://api.modrinth.com/v2/project/${p.modrinthId}/version?${q}`, {
+    headers: { 'User-Agent': 'Strikeborn/mod-hub (github.com/Strikeborn/mod-hub)' },
+  });
+  if (!res.ok) throw new Error(`Modrinth HTTP ${res.status}`);
+  const versions = (await res.json()) as { version_number: string; changelog?: string; date_published: string; files: { hashes: { sha1: string } }[] }[];
+  const mine = versions.findIndex((v) => v.files.some((f) => f.hashes.sha1 === p.sha1));
+  const entries: ChangeEntry[] = versions.slice(0, 15).map((v, i) => ({
+    version: v.version_number,
+    when: v.date_published,
+    notes: (v.changelog ?? '').trim() || '(no notes)',
+    isNew: mine < 0 ? i === 0 && Boolean(p.latestVersion) : i < mine,
+  }));
+  return {
+    source: 'modrinth',
+    installed: { version: mine >= 0 ? versions[mine].version_number : mod.version },
+    latest: { version: versions[0]?.version_number, when: versions[0]?.date_published },
+    entries,
+    pageUrl: `https://modrinth.com/mod/${p.modrinthId}/versions`,
+  };
+}
+
 export async function getModChanges(mod: ModRecord, nexusApiKey?: string): Promise<ModChanges> {
   try {
     if (mod.workshopId) return await workshopChanges(mod);
+    if (mod.prism?.modrinthId) return await modrinthChanges(mod);
     if (mod.nexusModId && mod.nexusGameDomain && nexusApiKey) return await nexusChanges(mod, nexusApiKey);
   } catch (e) {
-    return { source: mod.workshopId ? 'workshop' : 'nexus', installed: {}, latest: {}, entries: [], error: String((e as Error).message ?? e) };
+    return { source: mod.workshopId ? 'workshop' : mod.prism?.modrinthId ? 'modrinth' : 'nexus', installed: {}, latest: {}, entries: [], error: String((e as Error).message ?? e) };
   }
   return { source: 'none', installed: {}, latest: {}, entries: [] };
 }
