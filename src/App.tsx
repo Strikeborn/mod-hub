@@ -371,7 +371,10 @@ function AppInner() {
   const pluginGame = gameFilter === 'skyrimse' && loadOrders.skyrimse ? 'skyrimse' : null;
   /** Games with an issues check (RimWorld order + deps, PZ deps, Skyrim plugin masters). */
   const issueGame =
-    orderGame ?? pluginGame ?? (gameFilter === 'project-zomboid' && loadOrders['project-zomboid'] ? 'project-zomboid' : null);
+    orderGame ??
+    pluginGame ??
+    (gameFilter === 'project-zomboid' && loadOrders['project-zomboid'] ? 'project-zomboid' : null) ??
+    (gameFilter === 'baldursgate3' && loadOrders.baldursgate3 ? 'baldursgate3' : null);
   useEffect(() => {
     setPendingOrder(null);
     setShowOrderIssues(false);
@@ -1007,9 +1010,17 @@ function AppInner() {
                     <li>
                       {issueGame === 'skyrimse'
                         ? 'No problems: every active plugin has its masters, loading before it, and no SKSE DLL loads without its plugin.'
+                        : issueGame === 'baldursgate3'
+                          ? 'No problems: every active mod has its .pak and its dependencies (active, loading first), and Script Extender is there if needed.'
                         : 'No problems: every dependency and loadAfter/loadBefore rule is satisfied.'}
                     </li>
                   )}
+              {issueGame === 'baldursgate3' && orderPlan.moved > 0 && (
+                <li>
+                  <span className="order-issue-kind">Suggested order</span>
+                  Vortex owns BG3's list, so set this in Vortex's Load Order page: {orderPlan.proposed.join(' → ')}
+                </li>
+              )}
               {orderPlan.issues.map((i, n) => (
                 <li key={n} className={`issue-${i.kind}`}>
                   <span className="order-issue-kind">{ISSUE_LABELS[i.kind]}</span>
@@ -1024,7 +1035,7 @@ function AppInner() {
                       </button>
                     ) : null;
                   })()}
-                  {i.kind === 'dependency-missing' && i.otherId && issueGame !== 'skyrimse' && (
+                  {i.kind === 'dependency-missing' && i.otherId && (issueGame === 'rimworld' || issueGame === 'project-zomboid') && (
                     <button
                       type="button"
                       className="btn btn-xs"

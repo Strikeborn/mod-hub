@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { GameLoadOrder, ModLoadState, ModRecord } from '../shared/types';
 import { steamGameDir } from './workshopActions';
 import { findMo2Instances, readMo2Modlist, readMo2Plugins } from './mo2';
+import { readPakInfo } from './bg3Pak';
 
 /**
  * Read-only load-order adapters. Each reads the game's OWN config (what the game will actually load),
@@ -153,11 +154,12 @@ const baldursGate3: Adapter = (mods) => {
     .map((m) => ({
       folder: /id="Folder"[^>]*value="([^"]*)"/i.exec(m[1])?.[1] ?? '',
       name: /id="Name"[^>]*value="([^"]*)"/i.exec(m[1])?.[1] ?? '',
+      uuid: (/id="UUID"[^>]*value="([^"]*)"/i.exec(m[1])?.[1] ?? '').toLowerCase(),
     }))
     .filter((e) => e.folder && !BG3_BASE.test(e.folder));
 
   // .pak in the Mods folder -> the Vortex staging folder it links to.
-  const paks: { key: string; target?: string }[] = [];
+  const paks: { key: string; target?: string; uuids: string[] }[] = [];
   const modsDir = path.join(root, 'Mods');
   try {
     for (const f of fs.readdirSync(modsDir)) {
@@ -168,7 +170,9 @@ const baldursGate3: Adapter = (mods) => {
       } catch {
         /* broken link */
       }
-      paks.push({ key: bg3Norm(f.replace(/\.pak$/i, '')), target });
+      // The pak's own meta.lsx names its module UUID: exact match with modsettings.lsx entries.
+      const uuids = readPakInfo(path.join(modsDir, f)).modules.map((m) => m.uuid.toLowerCase());
+      paks.push({ key: bg3Norm(f.replace(/\.pak$/i, '')), target, uuids });
     }
   } catch {
     /* no Mods folder */
@@ -178,7 +182,9 @@ const baldursGate3: Adapter = (mods) => {
     if (m.gameId !== 'baldursgate3') continue;
     for (const p of [m.localPath, ...(m.alternateLocalPaths ?? [])]) if (p) rowByFolder.set(path.normalize(p).toLowerCase(), m);
   }
-  const findPak = (e: { folder: string; name: string }) => {
+  const findPak = (e: { folder: string; name: string; uuid: string }) => {
+    const exact = e.uuid ? paks.find((p) => p.uuids.includes(e.uuid)) : undefined;
+    if (exact) return exact;
     const keys = [bg3Norm(e.folder), bg3Norm(e.name)].filter((k) => k.length >= 4);
     return (
       paks.find((p) => keys.includes(p.key)) ??

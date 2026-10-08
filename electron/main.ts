@@ -14,6 +14,7 @@ import { diskCachedThumbnail } from './thumbDiskCache';
 import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
 import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, pluginSync, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
 import { latestCrash } from './crashLogs';
+import { bg3ScriptExtenderInstalled, installedPaks, planBg3Order, readModsettings } from './bg3Checks';
 import { planPzOrder } from './pzDeps';
 import { enforceLuaDebugOff, isaacLuaDebugState } from './luaGuard';
 import { backgroundSecurityPass, checkMod, initSecurityStore, lastSweep, recordSweep, securityOverview, securityReport } from './modSecurity';
@@ -768,6 +769,16 @@ function registerIpc() {
       const inc = plan.issues.filter((i) => i.kind === 'incompatible' || i.kind === 'duplicate-id').length;
       if (inc) warnings.push(`${inc} incompatible/duplicate pair(s) enabled.`);
     }
+    if (gameId === 'baldursgate3' && bg3ScriptExtenderInstalled() === false) {
+      const active = new Set(readModsettings().map((e) => e.uuid.toLowerCase()));
+      const needing = installedPaks()
+        .filter((p) => p.usesScriptExtender)
+        .flatMap((p) => p.modules)
+        .filter((m) => active.has(m.uuid.toLowerCase()));
+      if (needing.length) {
+        warnings.push(`BG3 Script Extender isn't installed, but ${needing.length} active mod(s) need it (${needing.map((m) => m.name).join(', ')}).`);
+      }
+    }
     if (gameId === 'binding-of-isaac') {
       const lua = isaacLuaDebugState();
       if (lua.launcher && settings.isaacLuaDebugGuard !== false && enforceLuaDebugOff()) {
@@ -844,6 +855,7 @@ function registerIpc() {
   ipcMain.handle('modhub:planLoadOrder', (_e, gameId: string, order?: string[]) => {
     const mods = store.loadCatalog().mods;
     if (isPluginGame(gameId)) return planPluginOrder(gameId, mods, store.loadSettings().playChoices?.[gameId], order);
+    if (gameId === 'baldursgate3') return planBg3Order();
     if (gameId === 'project-zomboid') {
       let pzOrder = order;
       if (!pzOrder) {
