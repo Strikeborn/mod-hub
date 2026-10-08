@@ -35,7 +35,7 @@ function decode(html: string): string {
 }
 
 /** Compare "1.2.10" vs "1.2.9"; non-numeric parts compared as text. */
-function cmpVersion(a: string, b: string): number {
+export function cmpVersion(a: string, b: string): number {
   const pa = a.replace(/^v/i, '').split(/[.\-_ ]/);
   const pb = b.replace(/^v/i, '').split(/[.\-_ ]/);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {

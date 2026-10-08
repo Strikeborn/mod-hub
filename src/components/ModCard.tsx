@@ -1,8 +1,10 @@
 import { memo, useState } from 'react';
-import type { GameRecord, ModLoadState, ModRecord } from '@shared/types';
+import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord } from '@shared/types';
 import { plainModDescription } from '@shared/plainDescription';
 import { bestPreviewFilePath, deployedDiskPath } from '@shared/modDiskPath';
 import { ModThumbnail } from './ModThumbnail';
+import { StarRating } from './StarRating';
+import { compactNumber, ratingTitle, workshopRating } from '../utils/workshopRating';
 import { formatBytes, formatFullDate, formatShortDate, sourceLabel } from '../utils/format';
 import { openModDetails } from '../utils/modDetails';
 import { similarInstalled } from '../utils/similarMods';
@@ -17,6 +19,8 @@ type Props = {
   /** Enabled/position in the game's own mod list, when the game is supported. */
   loadState?: ModLoadState;
   onToggleEnabled?: (mod: ModRecord, enabled: boolean) => void;
+  /** Isaac: resource files this mod wins/loses against other enabled mods. */
+  conflict?: IsaacConflicts['perMod'][string];
   games: GameRecord[];
   variant?: 'steam' | 'nexus' | 'library';
   trackedNexus?: Set<string>;
@@ -41,6 +45,7 @@ export const ModCard = memo(function ModCard({
   mod,
   loadState,
   onToggleEnabled,
+  conflict,
   games,
   variant = 'library',
   trackedNexus,
@@ -107,6 +112,8 @@ export const ModCard = memo(function ModCard({
   const gameName = displayGameName(mod, games);
   const title = mod.source === 'steam-workshop' ? workshopDisplayTitle(mod) : mod.title;
   const description = plainModDescription(mod.description, 220);
+  const rating = workshopRating(mod);
+  const reupload = mod.reuploadCandidates?.[0];
   const stubTitle = mod.source === 'steam-workshop' && isWorkshopStubTitle(mod.title);
 
   return (
@@ -136,11 +143,74 @@ export const ModCard = memo(function ModCard({
               />
             </span>
           )}
+          {rating && (
+            <span className="mod-card-rating" title={ratingTitle(rating)}>
+              {rating.few ? (
+                <span className="star-rating star-rating-empty">Few ratings ({rating.total})</span>
+              ) : (
+                <>
+                  <StarRating score={rating.stars} />
+                  <span className="mod-card-votes">({rating.total.toLocaleString()})</span>
+                </>
+              )}
+            </span>
+          )}
+          {!rating && mod.nexusEndorsements != null && (
+            <span
+              className="mod-card-rating"
+              title={`Nexus: ${mod.nexusEndorsements.toLocaleString()} endorsements, ${(mod.nexusDownloads ?? 0).toLocaleString()} downloads`}
+            >
+              <span className="nexus-endorse">♥ {compactNumber(mod.nexusEndorsements)}</span>
+              {mod.nexusDownloads != null && <span className="mod-card-votes">⬇ {compactNumber(mod.nexusDownloads)}</span>}
+            </span>
+          )}
+          {conflict && conflict.losses > 0 && (
+            <span
+              className="status-pill update"
+              title={`${conflict.losses} of this mod's files are replaced by: ${[...new Set(conflict.lostTo)].join(', ')} (they load first). Disable those or this mod if it looks wrong.`}
+            >
+              {conflict.losses} file{conflict.losses === 1 ? '' : 's'} overridden by {conflict.lostTo[0]}
+              {new Set(conflict.lostTo).size > 1 ? ` +${new Set(conflict.lostTo).size - 1}` : ''}
+            </span>
+          )}
+          {conflict && conflict.wins > 0 && conflict.losses === 0 && (
+            <span
+              className="status-pill"
+              title={`This mod's files replace ${conflict.wins} file(s) from: ${[...new Set(conflict.winsOver)].join(', ')}.`}
+            >
+              Overrides {conflict.wins} file{conflict.wins === 1 ? '' : 's'} of {new Set(conflict.winsOver).size} mod
+              {new Set(conflict.winsOver).size === 1 ? '' : 's'}
+            </span>
+          )}
+          {mod.nexusUpdateAvailable && mod.nexusModId && mod.nexusGameDomain && (
+            <button
+              type="button"
+              className="status-pill update reupload-pill"
+              title="A newer version is on Nexus. Click to open the mod page (download it through Vortex as usual)."
+              onClick={() => void window.modHub?.nexusOpenMod(mod.nexusGameDomain!, mod.nexusModId!)}
+            >
+              Update on Nexus: {mod.version} → {mod.nexusLatestVersion}
+            </button>
+          )}
+          {reupload && (
+            <button
+              type="button"
+              className="status-pill update reupload-pill"
+              title={`Removed from the Workshop. Possible re-upload: “${reupload.title}” by ${reupload.ownerName ?? reupload.ownerSteamId ?? 'unknown'}${
+                reupload.sameAuthor === 'yes' ? ' (same author)' : reupload.sameAuthor === 'no' ? ' (different uploader)' : ''
+              }. Click to open its Workshop page. Nothing is subscribed automatically.`}
+              onClick={() => void window.modHub?.steamOpenWorkshop(reupload.appId, reupload.workshopId)}
+            >
+              {reupload.installed ? 'Re-upload installed: ' : 'Re-uploaded? '}
+              {reupload.title}
+              {reupload.sameAuthor === 'yes' ? ' · same author ✓' : reupload.sameAuthor === 'no' ? ' · other uploader' : ''}
+            </button>
+          )}
           {loadState && (
             <button
               type="button"
               className={`status-pill load-pill${loadState.enabled ? ' load-pill-on' : ''}`}
-              disabled={!onToggleEnabled}
+              disabled={!onToggleEnabled || loadState.readOnly}
               title={
                 loadState.enabled
                   ? `Enabled in game, load order ${loadState.position}. Click to disable.`
@@ -149,6 +219,7 @@ export const ModCard = memo(function ModCard({
               onClick={() => onToggleEnabled?.(mod, !loadState.enabled)}
             >
               {loadState.enabled ? `Enabled · load order ${loadState.position}` : 'Disabled in game'}
+              {loadState.readOnly ? ' (Vortex)' : ''}
             </button>
           )}
           {stubTitle && (
@@ -211,6 +282,12 @@ export const ModCard = memo(function ModCard({
               }).${mod.workshopArchived.requiredDlc?.length ? ` Required DLC: ${mod.workshopArchived.requiredDlc.join(', ')}.` : ''}`}
             >
               Last known Workshop info ({mod.workshopArchived.source})
+            </span>
+          )}
+          {mod.thunderstore && (
+            <span className={`status-pill${mod.thunderstore.enabled ? '' : ' update'}`} title={`r2modman profile “${mod.thunderstore.profile}”: ${mod.thunderstore.packageName}`}>
+              Thunderstore · {mod.thunderstore.profile}
+              {mod.thunderstore.enabled ? '' : ' · disabled'}
             </span>
           )}
           {mod.tags?.includes('isaac-game-copy') && (

@@ -539,6 +539,27 @@ button {
   color: #f0b429;
   letter-spacing: 0.05em;
   font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Partial stars: grey row underneath, gold row clipped to the score on top. */
+.star-rating-track {
+  position: relative;
+  display: inline-block;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.star-rating-base {
+  color: rgba(255, 255, 255, 0.18);
+}
+
+.star-rating-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  overflow: hidden;
+  color: #f0b429;
 }
 
 .star-rating-empty {
@@ -1830,4 +1851,109 @@ button.load-pill:disabled {
 .order-issues .issue-dependency-off .order-issue-kind,
 .order-issues .issue-duplicate-id .order-issue-kind {
   color: #f0b45a;
+}
+
+/* Workshop ratings + re-upload suggestions */
+.mod-card-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.mod-card-votes {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+button.reupload-pill {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.reupload-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.reupload-author {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.reupload-author.yes {
+  color: #9fdcb2;
+}
+
+.reupload-author.no {
+  color: #f0b45a;
+}
+
+.reupload-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.conflict-panel {
+  max-height: 320px;
+}
+
+.conflict-toggle {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  text-align: left;
+  padding: 0.1rem 0;
+  cursor: pointer;
+}
+
+.conflict-toggle strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.conflict-files {
+  margin: 0.15rem 0 0.35rem 1.2rem;
+  padding: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* Duplicates */
+.dup-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.85rem;
+}
+
+.dup-group.is-ignored {
+  opacity: 0.6;
+}
+
+.dup-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.dup-spacer {
+  flex: 1;
+}
+
+.dup-table tbody tr {
+  content-visibility: visible;
+}
+
+.nexus-endorse {
+  color: #e8846a;
+  font-size: 0.8rem;
 }

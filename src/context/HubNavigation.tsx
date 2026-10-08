@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 
-export type HubTab = 'library' | 'steam' | 'nexus' | 'games' | 'loadouts' | 'settings';
+export type HubTab = 'library' | 'steam' | 'nexus' | 'games' | 'loadouts' | 'duplicates' | 'settings';
 export type SteamPanel = 'installed' | 'hub-browse' | 'browse';
 export type NexusPanel = 'installed' | 'browse' | 'injected' | 'native';
 

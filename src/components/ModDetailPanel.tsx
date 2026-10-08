@@ -10,8 +10,63 @@ import { AuthorLink } from './AuthorLink';
 import { toast } from '../utils/toast';
 import { similarInstalled } from '../utils/similarMods';
 import { openModDetails } from '../utils/modDetails';
+import { ratingTitle, workshopRating } from '../utils/workshopRating';
 
 type Changes = Awaited<ReturnType<NonNullable<Window['modHub']>['getModChanges']>>;
+
+/** Removed Workshop mod: same-title items on the Workshop. Suggestions only; subscribing needs your click. */
+function ReuploadSection({ mod }: { mod: ModRecord }) {
+  const list = mod.reuploadCandidates ?? [];
+  if (!mod.workshopHidden && !list.length) return null;
+  async function subscribe(appId: number, workshopId: string, title: string) {
+    if (!window.modHub) return;
+    if (!window.confirm(`Subscribe to “${title}” on the Steam Workshop?\n\nSteam will download it like any other subscription.`)) return;
+    const r = await window.modHub.steamSubscribe(appId, workshopId);
+    toast(r.message, r.ok ? 'ok' : 'error');
+  }
+  return (
+    <section className="detail-cross">
+      <h3>Removed from the Workshop</h3>
+      {list.length === 0 ? (
+        <p className="detail-muted">
+          No same-title upload found{mod.reuploadCheckedAt ? ` (checked ${new Date(mod.reuploadCheckedAt).toLocaleDateString()})` : ' yet'}.
+        </p>
+      ) : (
+        <>
+          <p className="detail-muted">Possible re-uploads. Nothing is subscribed automatically.</p>
+          <ul className="reupload-list">
+            {list.map((c) => (
+              <li key={c.workshopId}>
+                <div>
+                  <strong>{c.title}</strong>
+                  <span className={`reupload-author ${c.sameAuthor}`}>
+                    {c.sameAuthor === 'yes' ? 'same author ✓' : c.sameAuthor === 'no' ? 'different uploader' : 'author unknown'}
+                  </span>
+                </div>
+                <div className="detail-muted">
+                  by {c.ownerName ?? c.ownerSteamId ?? '?'} · {c.titleMatch === 'exact' ? 'same title' : 'similar title'}
+                  {c.createdAt ? ` · uploaded ${new Date(c.createdAt).toLocaleDateString()}` : ''}
+                  {c.votesUp != null ? ` · ${c.votesUp} up / ${c.votesDown ?? 0} down` : ''}
+                  {c.installed ? ' · already in your library' : ''}
+                </div>
+                <div className="reupload-actions">
+                  <button type="button" className="btn btn-sm" onClick={() => void window.modHub?.steamOpenWorkshop(c.appId, c.workshopId)}>
+                    Workshop page
+                  </button>
+                  {!c.installed && (
+                    <button type="button" className="btn btn-sm" onClick={() => void subscribe(c.appId, c.workshopId, c.title)}>
+                      Subscribe…
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
 
 function ChangesSection({ mod }: { mod: ModRecord }) {
   const [changes, setChanges] = useState<Changes | null>(null);
@@ -472,6 +527,10 @@ export function ModDetailPanel({ mod, games, allMods, onClose }: Props) {
               {mod.nexusStatus ? ` · ${mod.nexusStatus.replace(/_/g, ' ')}` : ''}
             </Row>
           )}
+          {(() => {
+            const r = workshopRating(mod);
+            return r ? <Row label="Workshop rating">{ratingTitle(r).replace('Workshop rating: ', '')}</Row> : null;
+          })()}
           {!!mod.gameVersionTags?.length && <Row label="Game versions">{mod.gameVersionTags.join(', ')}</Row>}
           {!!mod.workshopCategories?.length && <Row label="Categories">{mod.workshopCategories.join(', ')}</Row>}
           <Row label="On disk">
@@ -486,6 +545,7 @@ export function ModDetailPanel({ mod, games, allMods, onClose }: Props) {
 
         <ChangesSection mod={mod} />
         <HistorySection mod={mod} />
+        <ReuploadSection mod={mod} />
         <CrossPlatformSection mod={mod} all={allMods} />
 
         {description && (

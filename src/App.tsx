@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { CatalogSnapshot, GameLoadOrder, ModLoadState, ModRecord, OrderPlan, ScanProgressEvent, ViewMode } from '@shared/types';
+import type { CatalogSnapshot, GameLoadOrder, IsaacConflicts, ModLoadState, ModRecord, OrderPlan, ScanProgressEvent, ViewMode } from '@shared/types';
 import { isNexusLikeSource } from './utils/games';
 import { prefetchModThumbnails } from './utils/prefetchThumbnails';
 import { Sidebar } from './components/Sidebar';
@@ -21,6 +21,7 @@ import { SteamView } from './views/SteamView';
 import { NexusView } from './views/NexusView';
 import { GamesView } from './views/GamesView';
 import { LoadoutsView } from './views/LoadoutsView';
+import { DuplicatesView } from './views/DuplicatesView';
 import { SettingsView } from './views/SettingsView';
 
 const emptyCatalog: CatalogSnapshot = { scannedAt: '', games: [], mods: [] };
@@ -360,6 +361,25 @@ function AppInner() {
     };
   }, [orderGame, pendingOrder, loadOrders]);
 
+  // Isaac: mods replacing the same resource files (re-read whenever the enabled state changes).
+  const [isaacConflicts, setIsaacConflicts] = useState<IsaacConflicts | null>(null);
+  const [showConflicts, setShowConflicts] = useState(false);
+  const [openPair, setOpenPair] = useState<number | null>(null);
+  const conflictGame = gameFilter === 'binding-of-isaac' && loadOrders['binding-of-isaac'];
+  useEffect(() => {
+    if (!conflictGame || !window.modHub?.getIsaacConflicts) {
+      setIsaacConflicts(null);
+      return;
+    }
+    let cancelled = false;
+    void window.modHub.getIsaacConflicts().then((c) => {
+      if (!cancelled) setIsaacConflicts(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conflictGame, loadOrders]);
+
   const pendingMoved = pendingOrder
     ? pendingOrder.ids.filter((id, i) => rwNorm(id) !== rwNorm(pendingOrder.base[i] ?? '')).length
     : 0;
@@ -644,7 +664,7 @@ function AppInner() {
                       <option value="disabled">Disabled</option>
                     </select>
                   </label>
-                  {activeLoadOrder && (
+                  {activeLoadOrder && !activeLoadOrder.readOnly && (
                     <>
                       <button
                         type="button"
@@ -674,6 +694,16 @@ function AppInner() {
                         </option>
                       </select>
                     </label>
+                  )}
+                  {isaacConflicts && (
+                    <button
+                      type="button"
+                      className={`btn btn-sm order-check${isaacConflicts.pairs.length ? ' has-issues' : ''}`}
+                      title={`Enabled mods that ship the same resource files (${isaacConflicts.filesChecked.toLocaleString()} files in ${isaacConflicts.modsChecked} enabled mods checked)`}
+                      onClick={() => setShowConflicts((v) => !v)}
+                    >
+                      {isaacConflicts.pairs.length ? `⚠ ${isaacConflicts.pairs.length} file conflicts` : '✓ No file conflicts'}
+                    </button>
                   )}
                   {orderGame && (
                     <>
@@ -768,6 +798,31 @@ function AppInner() {
               </button>
             </div>
           )}
+          {tab === 'library' && isaacConflicts && showConflicts && (
+            <div className="order-issues conflict-panel">
+              <p className="detail-muted">
+                When two enabled mods ship the same file, Isaac uses the one that loads first (folder-name order, which is
+                why texture packs start with “!”). Lua scripts and content XML are merged, so only resources/ files count.
+              </p>
+              {isaacConflicts.pairs.length === 0 && <div>No enabled mods replace the same files.</div>}
+              {isaacConflicts.pairs.map((p, n) => (
+                <div key={`${p.winner.folder}>${p.loser.folder}`} className="conflict-row">
+                  <button type="button" className="conflict-toggle" onClick={() => setOpenPair(openPair === n ? null : n)}>
+                    <strong>{p.winner.title}</strong> overrides <strong>{p.loser.title}</strong> on {p.fileCount.toLocaleString()} file
+                    {p.fileCount === 1 ? '' : 's'} {openPair === n ? '▾' : '▸'}
+                  </button>
+                  {openPair === n && (
+                    <ul className="conflict-files">
+                      {p.sampleFiles.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                      {p.fileCount > p.sampleFiles.length && <li>… and {p.fileCount - p.sampleFiles.length} more</li>}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {tab === 'library' && orderGame && showOrderIssues && orderPlan && (
             <ul className="order-issues">
               {orderPlan.issues.length === 0 && <li>No problems: every dependency and loadAfter/loadBefore rule is satisfied.</li>}
@@ -783,6 +838,7 @@ function AppInner() {
             <LibraryView
               onReorder={orderGame && sortMode === 'load-order' ? onReorder : undefined}
               orderSortActive={Boolean(activeLoadOrder) && sortMode === 'load-order'}
+              conflicts={isaacConflicts?.perMod}
               onOrderSort={activeLoadOrder ? (on) => setSortMode(on ? 'load-order' : 'title') : undefined}
               loadStates={loadStates}
               onToggleEnabled={onToggleEnabled}
@@ -823,6 +879,9 @@ function AppInner() {
           )}
           {tab === 'games' && <GamesView catalog={catalog} />}
           {tab === 'loadouts' && <LoadoutsView catalog={catalog} onChanged={() => void refreshLoadOrders()} />}
+          {tab === 'duplicates' && (
+            <DuplicatesView catalog={catalog} hiddenGames={hiddenGames} loadStates={loadStates} onToggleEnabled={onToggleEnabled} />
+          )}
           {tab === 'settings' && <SettingsView catalog={catalog} onSaved={reload} />}
         </main>
       </div>

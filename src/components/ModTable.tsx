@@ -8,8 +8,9 @@ import { displayGameName } from '../utils/gameDisplay';
 import { workshopDisplayTitle } from '../utils/workshopLabels';
 import { isNexusLikeSource, steamAppIdForGameId } from '../utils/games';
 import { gameVersionsFor } from '../utils/modVersions';
+import { compactNumber, ratingTitle, workshopRating } from '../utils/workshopRating';
 
-type SortKey = 'order' | 'ingame' | 'for' | 'title' | 'game' | 'source' | 'author' | 'version' | 'size' | 'uploaded' | 'updated' | 'status';
+type SortKey = 'order' | 'ingame' | 'for' | 'rating' | 'title' | 'game' | 'source' | 'author' | 'version' | 'size' | 'uploaded' | 'updated' | 'status';
 
 type Props = {
   mods: ModRecord[];
@@ -33,6 +34,7 @@ function rowTitle(m: ModRecord): string {
 /** One short status per row; the detail panel has the full story. */
 function rowStatus(m: ModRecord, trackedNexus?: Set<string>): { text: string; warn?: boolean } {
   if (m.revision.updateAvailable) return { text: 'Update available', warn: true };
+  if (m.nexusUpdateAvailable) return { text: `Update on Nexus: ${m.nexusLatestVersion}`, warn: true };
   if (m.localMissing) return { text: 'Missing on disk', warn: true };
   if (m.nexusStatus && m.nexusStatus !== 'published') return { text: `Nexus: ${m.nexusStatus.replace(/_/g, ' ')}`, warn: true };
   if (m.workshopHidden) return { text: 'Hidden on Workshop', warn: true };
@@ -67,6 +69,10 @@ function sortValue(
       return inGameText(m, st);
     case 'for':
       return gameVersionsFor(m)?.short ?? '';
+    case 'rating': {
+      const r = workshopRating(m);
+      return r && !r.few ? r.stars * 1e7 + r.total : r ? r.total : m.nexusEndorsements != null ? m.nexusEndorsements / 1e6 : -1;
+    }
     case 'title':
       return rowTitle(m).toLowerCase();
     case 'game':
@@ -96,6 +102,7 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: 'author', label: 'Author' },
   { key: 'version', label: 'Version', className: 'col-narrow' },
   { key: 'for', label: 'For' },
+  { key: 'rating', label: 'Rating', className: 'col-num' },
   { key: 'size', label: 'Size', className: 'col-num' },
   { key: 'uploaded', label: 'Uploaded', className: 'col-date' },
   { key: 'updated', label: 'Updated', className: 'col-date' },
@@ -128,6 +135,7 @@ const Row = memo(function Row({
   const diskPath = deployedDiskPath(mod);
   const appId = mod.steamAppId ?? steamAppIdForGameId(mod.gameId);
   const versions = gameVersionsFor(mod);
+  const rating = workshopRating(mod);
   return (
     <tr
       className={`${draggable ? 'is-draggable' : ''}${dragOver ? ' drag-over' : ''}`}
@@ -182,6 +190,15 @@ const Row = memo(function Row({
       <td className="col-ellipsis" title={versions?.full}>
         {versions ? (versions.guessed ? <span className="mod-table-guess">{versions.short}</span> : versions.short) : '—'}
       </td>
+      <td className="col-num" title={rating ? ratingTitle(rating) : undefined}>
+        {rating
+          ? rating.few
+            ? `few (${rating.total})`
+            : `★ ${rating.stars.toFixed(1)}`
+          : mod.nexusEndorsements != null
+            ? `♥ ${compactNumber(mod.nexusEndorsements)}`
+            : '—'}
+      </td>
       <td className="col-num">{formatBytes(mod.sizeBytes)}</td>
       <td className="col-date" title={formatFullDate(mod.remoteCreatedAt)}>
         {formatShortDate(mod.remoteCreatedAt)}
@@ -190,7 +207,7 @@ const Row = memo(function Row({
         {formatShortDate(mod.remoteUpdatedAt)}
       </td>
       <td>
-        {loadState && onToggleEnabled ? (
+        {loadState && onToggleEnabled && !loadState.readOnly ? (
           <button
             type="button"
             className={`mod-table-toggle${loadState.enabled ? ' on' : ' off'}`}
@@ -201,7 +218,13 @@ const Row = memo(function Row({
             {loadState.enabled ? 'Enabled' : 'Disabled'}
           </button>
         ) : (
-          <span className={`mod-table-ingame${loadState?.enabled ? ' on' : loadState ? ' off' : ''}`}>{inGameText(mod, loadState)}</span>
+          <span
+            className={`mod-table-ingame${loadState?.enabled ? ' on' : loadState ? ' off' : ''}`}
+            title={loadState?.readOnly ? 'Managed by Vortex: change it there' : undefined}
+          >
+            {inGameText(mod, loadState)}
+            {loadState?.readOnly ? ' (Vortex)' : ''}
+          </span>
         )}
       </td>
       <td>
@@ -287,9 +310,9 @@ export function ModTable({ mods, games, trackedNexus, loadStates, onFavorite, on
       return;
     }
     setSort((s) => {
-      if (!s || s.key !== key) return { key, dir: key === 'size' || key === 'uploaded' || key === 'updated' ? -1 : 1 };
-      if (s.dir === 1 && !(key === 'size' || key === 'uploaded' || key === 'updated')) return { key, dir: -1 };
-      if (s.dir === -1 && (key === 'size' || key === 'uploaded' || key === 'updated')) return { key, dir: 1 };
+      if (!s || s.key !== key) return { key, dir: key === 'size' || key === 'uploaded' || key === 'updated' || key === 'rating' ? -1 : 1 };
+      if (s.dir === 1 && !(key === 'size' || key === 'uploaded' || key === 'updated' || key === 'rating')) return { key, dir: -1 };
+      if (s.dir === -1 && (key === 'size' || key === 'uploaded' || key === 'updated' || key === 'rating')) return { key, dir: 1 };
       return null;
     });
   }

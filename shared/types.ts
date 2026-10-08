@@ -72,6 +72,22 @@ export interface ModRecord {
   remotePreviewFromApi?: boolean;
   /** Removed/hidden on the Workshop: details shown come from Mod Hub's last-known archive (see workshopArchive.ts). */
   workshopArchived?: { source: 'steam' | 'wayback' | 'manual'; savedAt: string; note?: string; requiredDlc?: string[] };
+  /** Current version on Nexus (v2 GraphQL) and whether it's newer than the installed `version`. */
+  nexusLatestVersion?: string;
+  nexusUpdateAvailable?: boolean;
+  nexusCheckedAt?: string;
+  /** Nexus popularity (v2 GraphQL), refreshed with the update check. */
+  nexusEndorsements?: number;
+  nexusDownloads?: number;
+  /** Installed through r2modman / Thunderstore Mod Manager (read-only; the manager owns the profile). */
+  thunderstore?: { packageName: string; profile: string; websiteUrl?: string; enabled: boolean };
+  /** Steam Workshop votes (via the Steam client), refreshed at most daily. */
+  workshopVotesUp?: number;
+  workshopVotesDown?: number;
+  workshopVotesAt?: string;
+  /** Removed Workshop mods: same-title items found on the Workshop (suggestions only, never auto-subscribed). */
+  reuploadCandidates?: ReuploadCandidate[];
+  reuploadCheckedAt?: string;
   /** Last Nexus API details call for this mod (ISO); fill-in skips it for a while if Nexus had nothing more. */
   nexusApiCheckedAt?: string;
   /** Same mod on the other platform, confirmed by the user (or a description link). */
@@ -175,6 +191,12 @@ export interface HubSettings {
   nexusConnected: boolean;
   steamSessionNote?: string;
   lastFullScan?: string;
+  /** Last Workshop votes refresh through the Steam client (ISO). */
+  lastWorkshopVotesAt?: string;
+  /** Last "update on Nexus" check (ISO). */
+  lastNexusUpdateCheck?: string;
+  /** Duplicates tab: groups (sorted mod ids joined by +) the user marked as not duplicates. */
+  ignoredDuplicateGroups?: string[];
   /** Default game filter for All mods / Steam (all | game id). */
   defaultGameFilter?: string;
   lastGameFilter?: string;
@@ -186,11 +208,52 @@ export interface HubSettings {
   hiddenGames?: string[];
 }
 
+export interface IsaacConflictSide {
+  folder: string;
+  modId?: string;
+  title: string;
+}
+
+/** Two enabled Isaac mods shipping the same resource files; `winner` loads first, so its files are used. */
+export interface IsaacConflictPair {
+  winner: IsaacConflictSide;
+  loser: IsaacConflictSide;
+  fileCount: number;
+  sampleFiles: string[];
+}
+
+export interface IsaacConflicts {
+  pairs: IsaacConflictPair[];
+  /** By catalog mod id: files it wins / loses, and against which mods. */
+  perMod: Record<string, { wins: number; losses: number; winsOver: string[]; lostTo: string[] }>;
+  filesChecked: number;
+  modsChecked: number;
+}
+
+export interface ReuploadCandidate {
+  workshopId: string;
+  appId: number;
+  title: string;
+  ownerSteamId?: string;
+  ownerName?: string;
+  /** Compared with the removed mod's author (Steam id, or name from the archive). */
+  sameAuthor: 'yes' | 'no' | 'unknown';
+  titleMatch: 'exact' | 'close';
+  createdAt?: string;
+  votesUp?: number;
+  votesDown?: number;
+  previewUrl?: string;
+  /** Already in your library (subscribed or kept). */
+  installed?: boolean;
+}
+
 /** A mod's state in its game's own enabled list (read from the game's config, never from Mod Hub). */
 export interface ModLoadState {
   enabled: boolean;
   /** 1-based position in the game's load order (enabled mods only). */
   position?: number;
+  /** Another tool owns this list (BG3: Vortex writes modsettings.lsx), so Mod Hub only shows it. */
+  readOnly?: boolean;
 }
 
 /** Enabled mods + order for one game, as the game itself will load them. */
@@ -204,6 +267,8 @@ export interface GameLoadOrder {
   /** Keyed by catalog mod id. Mods missing here aren't installed where the game looks. */
   mods: Record<string, ModLoadState>;
   enabledCount: number;
+  /** Another tool owns this list (BG3 → Vortex); Mod Hub shows it but doesn't change it. */
+  readOnly?: boolean;
   /** Enabled entries with no matching catalog row: DLC/core, or mods that aren't installed. */
   unmatched: { id: string; position: number; note?: string }[];
   readAt: string;
@@ -339,6 +404,8 @@ export type IpcApi = {
   getThumbnail: (filePath: string) => Promise<string | null>;
   /** Read-only: each supported game's enabled mods and load order (RimWorld, Project Zomboid, Isaac). */
   getLoadOrders: () => Promise<Record<string, GameLoadOrder>>;
+  /** Enabled Isaac mods that replace the same resource files (winner = earlier in folder-name order). */
+  getIsaacConflicts: () => Promise<IsaacConflicts>;
   /** Turn mods on/off in the game's own list (refuses while the game runs; backs up config files first). */
   setModsEnabled: (gameId: string, modIds: string[], enabled: boolean) => Promise<{ ok: boolean; message: string; changed: number }>;
   getLoadouts: (gameId: string) => Promise<LoadoutsForGame>;

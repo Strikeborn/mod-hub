@@ -43,6 +43,7 @@ const modHub: IpcApi = {
   checkWorkshopUpdates: (gameSteamAppId?: number) => ipcRenderer.invoke('modhub:checkWorkshopUpdates', gameSteamAppId),
   getThumbnail: (filePath: string) => ipcRenderer.invoke('modhub:getThumbnail', filePath),
   getLoadOrders: () => ipcRenderer.invoke('modhub:getLoadOrders'),
+  getIsaacConflicts: () => ipcRenderer.invoke('modhub:getIsaacConflicts'),
   setModsEnabled: (gameId: string, modIds: string[], enabled: boolean) =>
     ipcRenderer.invoke('modhub:setModsEnabled', gameId, modIds, enabled),
   getLoadouts: (gameId: string) => ipcRenderer.invoke('modhub:getLoadouts', gameId),

@@ -14,6 +14,7 @@ import { resolveSteamCreatorNames, formatCreatorDisplay } from './steamCreators'
 import { applyDuplicateHints } from './dedupeMods';
 import { enrichModsWithNexusApi, hydrateNexusFieldsFromPrevious } from './nexusModDetails';
 import { applyWorkshopArchive, rememberWorkshopDetails } from './workshopArchive';
+import { scanThunderstoreProfiles } from './thunderstore';
 import { scanVortexMetadb } from './vortexMetadbScanner';
 import { syncArchiveVault } from './archiveVault';
 import { readWorkshopAcf } from './workshopAcf';
@@ -181,6 +182,12 @@ export async function scanAllMods(
     scanTreeForMods(extra, addMod, 'unknown', slugify(path.basename(extra)), 'extra');
   }
 
+  tick('extra', 'Thunderstore profiles (r2modman)...');
+  try {
+    scanThunderstoreProfiles(addMod);
+  } catch (e) {
+    console.warn('[Mod Hub] Thunderstore profile scan failed:', e);
+  }
   tick('vortex', 'Vortex staging & downloads...');
   const vortexState = await scanVortexStateModMeta();
   scanVortexInstalledModFolders(addMod);

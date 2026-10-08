@@ -12,7 +12,10 @@ import { GAMES_REGISTRY, gameById, gameBySteamAppId } from './gamesRegistry';
 import { steamAppDisplayName } from './steamAppNames';
 import { diskCachedThumbnail } from './thumbDiskCache';
 import { readLoadOrders } from './loadOrder';
+import { analyzeIsaacConflicts } from './isaacConflicts';
 import { applyWorkshopArchive } from './workshopArchive';
+import { findWorkshopReuploads, refreshWorkshopVotes } from './workshopCommunity';
+import { checkNexusUpdates } from './nexusUpdates';
 import { setLoadOrder, setModsEnabled } from './loadOrderWrite';
 import { planRimworldOrder, readRimworldActive } from './rimworldSort';
 import { applyLoadout, deleteLoadout, getLoadouts, saveCurrentLoadout, updateLoadout } from './loadouts';
@@ -313,6 +316,8 @@ function registerIpc() {
       store.loadCatalog().mods,
     );
     store.mergeScanResults(mods, report);
+    setTimeout(() => void workshopCommunityRefresh(true), 2000);
+    setTimeout(() => void nexusUpdateCheck(true), 1000);
     // Same dedupe/correlation pass as startup, so a scan never shows rows that vanish after a restart.
     return loadCatalogForWindow();
   });
@@ -323,6 +328,8 @@ function registerIpc() {
       catalogLoading = loadCatalogForWindow().finally(() => {
         catalogLoading = null;
         setTimeout(() => void backgroundNexusFill(), 3000);
+        setTimeout(() => void workshopCommunityRefresh(false), 15000);
+        setTimeout(() => void nexusUpdateCheck(false), 6000);
       });
     }
     return catalogLoading;
@@ -331,6 +338,83 @@ function registerIpc() {
   // Fill missing Nexus images / titles / dates / status in small batches after each catalog load.
   let nexusFillRunning = false;
   const nexusFillTried = new Set<string>();
+  // "Update on Nexus": installed version vs current Nexus version, every 6 h and after each scan.
+  let nexusUpdateRunning = false;
+  const nexusUpdateCheck = async (force: boolean) => {
+    if (nexusUpdateRunning) return;
+    const last = store.loadSettings().lastNexusUpdateCheck;
+    if (!force && last && Date.now() - Date.parse(last) < 6 * 60 * 60 * 1000) return;
+    nexusUpdateRunning = true;
+    try {
+      const cat = store.loadCatalog();
+      const r = await checkNexusUpdates(cat.mods);
+      store.saveSettings({ lastNexusUpdateCheck: new Date().toISOString() });
+      if (r.changed > 0) {
+        const byId = new Map(cat.mods.map((m) => [m.id, m]));
+        const fresh = store.loadCatalog();
+        for (const m of fresh.mods) {
+          const u = byId.get(m.id);
+          if (!u) continue;
+          m.nexusLatestVersion = u.nexusLatestVersion;
+          m.nexusUpdateAvailable = u.nexusUpdateAvailable;
+          m.nexusCheckedAt = u.nexusCheckedAt;
+          m.nexusEndorsements = u.nexusEndorsements;
+          m.nexusDownloads = u.nexusDownloads;
+          m.remoteUpdatedAt ||= u.remoteUpdatedAt;
+        }
+        store.saveCatalog(fresh);
+        mainWindow?.webContents.send('modhub:catalog-updated');
+      }
+      console.log(`[Mod Hub] Nexus updates: ${r.checked} mods checked, ${r.updates} with a newer version`);
+    } catch (e) {
+      console.warn('[Mod Hub] Nexus update check failed:', e);
+    } finally {
+      nexusUpdateRunning = false;
+    }
+  };
+
+  // Workshop ratings (daily) + re-upload suggestions for removed mods (weekly per mod), via the Steam client.
+  let communityRunning = false;
+  const workshopCommunityRefresh = async (afterScan: boolean) => {
+    if (communityRunning) return;
+    communityRunning = true;
+    try {
+      const settings = store.loadSettings();
+      const votesDue =
+        afterScan || !settings.lastWorkshopVotesAt || Date.now() - Date.parse(settings.lastWorkshopVotesAt) > 20 * 60 * 60 * 1000;
+      const cat = store.loadCatalog();
+      let changed = 0;
+      if (votesDue) {
+        changed += await refreshWorkshopVotes(cat.mods, steamHelperPath());
+        if (cat.mods.some((m) => m.workshopVotesAt)) store.saveSettings({ lastWorkshopVotesAt: new Date().toISOString() });
+      }
+      const reuploads = await findWorkshopReuploads(cat.mods, steamHelperPath());
+      changed += reuploads;
+      if (changed > 0) {
+        // Merge onto the latest catalog so a concurrent change isn't lost.
+        const byId = new Map(cat.mods.map((m) => [m.id, m]));
+        const fresh = store.loadCatalog();
+        for (const m of fresh.mods) {
+          const u = byId.get(m.id);
+          if (!u) continue;
+          m.workshopVotesUp = u.workshopVotesUp;
+          m.workshopVotesDown = u.workshopVotesDown;
+          m.workshopVotesAt = u.workshopVotesAt;
+          m.reuploadCandidates = u.reuploadCandidates;
+          m.reuploadCheckedAt = u.reuploadCheckedAt;
+          m.authorSteamId ||= u.authorSteamId;
+        }
+        store.saveCatalog(fresh);
+        mainWindow?.webContents.send('modhub:catalog-updated');
+      }
+      console.log(`[Mod Hub] Workshop community: ${votesDue ? 'ratings refreshed' : 'ratings fresh'}; ${reuploads} re-upload check(s) changed`);
+    } catch (e) {
+      console.warn('[Mod Hub] Workshop community refresh failed:', e);
+    } finally {
+      communityRunning = false;
+    }
+  };
+
   const backgroundNexusFill = async () => {
     const apiKey = store.loadSettings().nexusApiKey;
     if (nexusFillRunning || !apiKey) return;
@@ -462,6 +546,7 @@ function registerIpc() {
   };
 
   ipcMain.handle('modhub:getLoadOrders', () => readLoadOrders(store.loadCatalog().mods));
+  ipcMain.handle('modhub:getIsaacConflicts', () => analyzeIsaacConflicts(store.loadCatalog().mods));
 
   ipcMain.handle('modhub:getLoadouts', (_e, gameId: string) => getLoadouts(gameId, store.loadCatalog().mods));
   ipcMain.handle('modhub:applyLoadout', (_e, gameId: string, id: string) => applyLoadout(gameId, id, store.loadCatalog().mods));

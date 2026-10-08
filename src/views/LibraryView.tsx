@@ -1,4 +1,4 @@
-import type { GameRecord, ModLoadState, ModRecord, ViewMode } from '@shared/types';
+import type { GameRecord, IsaacConflicts, ModLoadState, ModRecord, ViewMode } from '@shared/types';
 import { ModCollectionView } from '../components/ModCollectionView';
 
 type Props = {
@@ -6,6 +6,8 @@ type Props = {
   onToggleEnabled?: (mod: ModRecord, enabled: boolean) => void;
   onReorder?: (draggedModId: string, targetModId: string) => void;
   orderSortActive?: boolean;
+  /** Isaac file conflicts per catalog mod id. */
+  conflicts?: IsaacConflicts['perMod'];
   onOrderSort?: (active: boolean) => void;
   mods: ModRecord[];
   games: GameRecord[];
@@ -21,6 +23,7 @@ type Props = {
 export function LibraryView({
   onReorder,
   orderSortActive,
+  conflicts,
   onOrderSort,
   loadStates,
   onToggleEnabled,
@@ -39,6 +42,7 @@ export function LibraryView({
       loadStates={loadStates}
       onReorder={onReorder}
       orderSortActive={orderSortActive}
+      conflicts={conflicts}
       onOrderSort={onOrderSort}
       onToggleEnabled={onToggleEnabled}
       mods={mods}

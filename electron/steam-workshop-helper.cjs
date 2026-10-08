@@ -1,5 +1,8 @@
 // Child-process helper: talk to the running Steam client about Workshop items.
-// Usage: node steam-workshop-helper.cjs <subscribe|unsubscribe|download> <appId> <id> [id ...]
+// Usage: node steam-workshop-helper.cjs <subscribe|unsubscribe|download|details> <appId> <id> [id ...]
+//        node steam-workshop-helper.cjs search <appId> <search text...>
+//   details = votes/owner/dates for any items (any game; one Steam session for all of them).
+//   search  = Workshop text search for <appId> (used to find re-uploads of removed mods).
 //   download = subscribe if needed, ask Steam for the newest version (high priority) and wait
 //              until it is installed; prints installInfo (folder, timestamp).
 // One JSON line per item on stdout: {"id","ok","error"?,"folder"?,"timestamp"?}
@@ -17,7 +20,7 @@ function withTimeout(p, ms, what) {
 (async () => {
   let client;
   try {
-    if (!['subscribe', 'unsubscribe', 'download'].includes(action)) throw new Error(`bad action ${action}`);
+    if (!['subscribe', 'unsubscribe', 'download', 'details', 'search'].includes(action)) throw new Error(`bad action ${action}`);
     client = require('steamworks.js').init(Number(appIdArg));
   } catch (err) {
     for (const id of ids) out({ id, ok: false, error: String((err && err.message) || err) });
@@ -25,6 +28,49 @@ function withTimeout(p, ms, what) {
     return;
   }
   const ws = client.workshop;
+  const itemInfo = (it) => ({
+    id: String(it.publishedFileId),
+    ok: true,
+    title: it.title,
+    appId: it.consumerAppId,
+    owner: it.owner && it.owner.steamId64 != null ? String(it.owner.steamId64) : undefined,
+    up: it.numUpvotes,
+    down: it.numDownvotes,
+    created: it.timeCreated,
+    updated: it.timeUpdated,
+    preview: it.previewUrl,
+  });
+  if (action === 'details') {
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50);
+      try {
+        const r = await withTimeout(ws.getItems(batch.map((x) => BigInt(x))), 30_000, 'details');
+        const got = new Set();
+        for (const it of r.items) {
+          if (!it) continue;
+          got.add(String(it.publishedFileId));
+          out(itemInfo(it));
+        }
+        for (const id of batch) if (!got.has(id)) out({ id, ok: false, error: 'not found' });
+      } catch (err) {
+        for (const id of batch) out({ id, ok: false, error: String((err && err.message) || err) });
+      }
+    }
+    setTimeout(() => process.exit(0), 50);
+    return;
+  }
+  if (action === 'search') {
+    const appId = Number(appIdArg);
+    try {
+      // 11 = RankedByTextSearch, 0 = UGCType.Items
+      const r = await withTimeout(ws.getAllItems(1, 11, 0, appId, appId, { searchText: ids.join(' ') }), 30_000, 'search');
+      for (const it of r.items) if (it) out(itemInfo(it));
+    } catch (err) {
+      out({ id: 'search', ok: false, error: String((err && err.message) || err) });
+    }
+    setTimeout(() => process.exit(0), 50);
+    return;
+  }
   for (const id of ids) {
     const item = BigInt(id);
     try {

@@ -23,6 +23,8 @@ export const GAMES_REGISTRY: GameRecord[] = [
   { id: 'gta4', name: 'Grand Theft Auto IV', steamAppId: 12210 },
   { id: 'skyrim', name: 'Skyrim (Legendary Edition)', steamAppId: 72850 },
   { id: 'terraria', name: 'Terraria', steamAppId: 105600 },
+  { id: 'lethal-company', name: 'Lethal Company', steamAppId: 1966720 },
+  { id: 'risk-of-rain-2', name: 'Risk of Rain 2', steamAppId: 632360 },
   { id: 'steam-241100', name: 'Steam Input Configs (controller layouts)', steamAppId: 241100 },
 ];
 

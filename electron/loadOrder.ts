@@ -133,7 +133,74 @@ const isaac: Adapter = (mods) => {
   return out;
 };
 
-const ADAPTERS: Adapter[] = [rimworld, projectZomboid, isaac];
+// Baldur's Gate 3: PlayerProfiles/Public/modsettings.lsx lists the active mods in order (Patch 7+: the "Mods"
+// node; GustavDev/Gustav/GustavX are the base game). Vortex writes this file, so it's shown read-only.
+// Entries name the mod's internal folder, so match them to the .pak files in the Mods folder (Vortex links
+// into its staging folder, which is the catalog row's localPath).
+const BG3_BASE = /^gustav(dev|x)?$/i;
+const bg3Norm = (s: string) => s.toLowerCase().replace(/_[0-9a-f]{8}-[0-9a-f-]{27}$/i, '').replace(/[^a-z0-9]/g, '');
+
+const baldursGate3: Adapter = (mods) => {
+  const root = path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'Larian Studios', "Baldur's Gate 3");
+  const file = path.join(root, 'PlayerProfiles', 'Public', 'modsettings.lsx');
+  if (!fs.existsSync(file)) return null;
+  const out = base('baldursgate3', 'modsettings.lsx (managed by Vortex, read-only)', file, 'list');
+  out.readOnly = true;
+  const xml = fs.readFileSync(file, 'utf8');
+  const modsBlock = /<node id="Mods">([\s\S]*?)<\/children>\s*<\/node>/i.exec(xml)?.[1] ?? xml;
+  const entries = [...modsBlock.matchAll(/<node id="ModuleShortDesc">([\s\S]*?)<\/node>/gi)]
+    .map((m) => ({
+      folder: /id="Folder"[^>]*value="([^"]*)"/i.exec(m[1])?.[1] ?? '',
+      name: /id="Name"[^>]*value="([^"]*)"/i.exec(m[1])?.[1] ?? '',
+    }))
+    .filter((e) => e.folder && !BG3_BASE.test(e.folder));
+
+  // .pak in the Mods folder -> the Vortex staging folder it links to.
+  const paks: { key: string; target?: string }[] = [];
+  const modsDir = path.join(root, 'Mods');
+  try {
+    for (const f of fs.readdirSync(modsDir)) {
+      if (!/\.pak$/i.test(f)) continue;
+      let target: string | undefined;
+      try {
+        target = path.dirname(fs.realpathSync(path.join(modsDir, f))).toLowerCase();
+      } catch {
+        /* broken link */
+      }
+      paks.push({ key: bg3Norm(f.replace(/\.pak$/i, '')), target });
+    }
+  } catch {
+    /* no Mods folder */
+  }
+  const rowByFolder = new Map<string, ModRecord>();
+  for (const m of mods) {
+    if (m.gameId !== 'baldursgate3') continue;
+    for (const p of [m.localPath, ...(m.alternateLocalPaths ?? [])]) if (p) rowByFolder.set(path.normalize(p).toLowerCase(), m);
+  }
+  const findPak = (e: { folder: string; name: string }) => {
+    const keys = [bg3Norm(e.folder), bg3Norm(e.name)].filter((k) => k.length >= 4);
+    return (
+      paks.find((p) => keys.includes(p.key)) ??
+      paks.find((p) => keys.some((k) => p.key.includes(k) || k.includes(p.key)) && p.key.length >= 4)
+    );
+  };
+  entries.forEach((e, i) => {
+    const pak = findPak(e);
+    const row = pak?.target ? rowByFolder.get(path.normalize(pak.target).toLowerCase()) : undefined;
+    if (row && !out.mods[row.id]) out.mods[row.id] = { enabled: true, position: i + 1, readOnly: true };
+    else if (!row) out.unmatched.push({ id: e.name || e.folder, position: i + 1, note: pak ? 'pak not linked to a Vortex mod' : 'no matching .pak' });
+  });
+  // Installed BG3 mods that aren't in the active list are off.
+  for (const m of mods) {
+    if (m.gameId === 'baldursgate3' && !out.mods[m.id] && paks.some((p) => p.target && rowByFolder.get(p.target) === m)) {
+      out.mods[m.id] = { enabled: false, readOnly: true };
+    }
+  }
+  out.enabledCount = entries.length;
+  return out;
+};
+
+const ADAPTERS: Adapter[] = [rimworld, projectZomboid, isaac, baldursGate3];
 
 export function readLoadOrders(mods: ModRecord[]): Record<string, GameLoadOrder> {
   const out: Record<string, GameLoadOrder> = {};

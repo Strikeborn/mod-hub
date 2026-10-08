@@ -13,6 +13,7 @@ const MAIN: { id: HubTab; label: string }[] = [
   { id: 'nexus', label: 'Nexus' },
   { id: 'games', label: 'Games' },
   { id: 'loadouts', label: 'Loadouts' },
+  { id: 'duplicates', label: 'Duplicates' },
 ];
 
 function GearIcon() {
